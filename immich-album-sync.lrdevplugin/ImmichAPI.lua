@@ -100,13 +100,13 @@ local function addAssetToAlbumByOriginalPath(albumId, assetOriginalPath)
     local insertPayload = json.encode({
         ids = assetIdList
     })
-    local insertResponse = LrHttp.put(prefs.immichURL .. "/api/albums/" .. albumId .. "/assets", insertPayload, {{
+    local insertResponse = LrHttp.post(prefs.immichURL .. "/api/albums/" .. albumId .. "/assets", insertPayload, {{
         field = "x-api-key",
         value = prefs.apiKey
     }, {
         field = "Content-Type",
         value = "application/json"
-    }})
+    }}, 'PUT')
 
     console:debugf("API: Add Asset to Album: %s -> %s", insertPayload, insertResponse)
 end
