@@ -12,7 +12,7 @@ local function showConfigDialog()
         bind_to_object = prefs,
 
         f:static_text{
-            title = "Immich Sync Configuration",
+            title = "Immich Album Sync Configuration",
             font = "<system/bold>"
         },
 
@@ -32,6 +32,17 @@ local function showConfigDialog()
         }},
 
         f:row{f:checkbox{
+            title = "Sync only selected albums",
+            value = LrView.bind("syncSpecificAlbums")
+        }},
+
+        f:row{f:edit_field{
+            title = "Albums to Sync (semicolon separated):",
+            value = LrView.bind("selectedAlbums"),
+            width_in_chars = 40
+        }},
+
+        f:row{f:checkbox{
             title = "Create missing albums in Lightroom",
             value = LrView.bind("createAlbumsInLightroom")
         }},
@@ -39,16 +50,6 @@ local function showConfigDialog()
         f:row{f:checkbox{
             title = "Create missing albums in Immich",
             value = LrView.bind("createAlbumsInImmich")
-        }},
-
-        f:row{f:checkbox{
-            title = "Check for missing photos in Lightroom",
-            value = LrView.bind("checkMissingInLightroom")
-        }},
-
-        f:row{f:checkbox{
-            title = "Check for missing photos in Immich",
-            value = LrView.bind("checkMissingInImmich")
         }},
 
         f:row{f:push_button{
