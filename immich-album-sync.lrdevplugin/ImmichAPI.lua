@@ -1,7 +1,10 @@
 -- ImmichAPI.lua - Handle API Calls to Immich
 local LrHttp = import "LrHttp"
-local json = require("json")
 local LrPrefs = import "LrPrefs"
+local LrPathUtils = import 'LrPathUtils'
+
+local dkjsonPath = LrPathUtils.child(_PLUGIN.path, "DkJson.lua")
+local json = dofile(dkjsonPath)
 
 local prefs = LrPrefs.prefsForPlugin()
 
