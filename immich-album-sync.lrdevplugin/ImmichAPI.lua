@@ -18,7 +18,7 @@ local function getImmichAlbums()
     if response then
         local data = json.decode(response)
         for _, album in ipairs(data) do
-            albums[album.name] = album.id
+            albums[album.albumName] = album.id
         end
     end
     return albums
