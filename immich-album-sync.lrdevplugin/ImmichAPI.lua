@@ -69,8 +69,51 @@ local function getPhotosInImmichAlbum(albumId)
     return photos
 end
 
+local function addAssetToAlbumByOriginalPath(albumId, assetOriginalPath)
+    console:infof("Adding asset to album: %s -> %s", assetOriginalPath, albumId)
+
+    local searchPayload = json.encode({
+        originalPath = assetOriginalPath
+    })
+    local searchResponse = LrHttp.post(prefs.immichURL .. "/api/search/metadata", searchPayload, {{
+        field = "x-api-key",
+        value = prefs.apiKey
+    }, {
+        field = "Content-Type",
+        value = "application/json"
+    }})
+
+    console:debugf("API: Search Asset by Original Path: %s -> %s", assetOriginalPath, searchResponse)
+
+    local data = json.decode(searchResponse)
+    local assetIds = {}
+    for _, asset in ipairs(data.assets.items) do
+        assetIds[asset.id] = asset.originalPath
+    end
+
+    local assetIdList = {}
+    for assetId, _ in pairs(assetIds) do
+        console:debugf("Adding asset to album: %s -> %s", assetId, albumId)
+        table.insert(assetIdList, assetId)
+    end
+
+    local insertPayload = json.encode({
+        ids = assetIdList
+    })
+    local insertResponse = LrHttp.put(prefs.immichURL .. "/api/albums/" .. albumId .. "/assets", insertPayload, {{
+        field = "x-api-key",
+        value = prefs.apiKey
+    }, {
+        field = "Content-Type",
+        value = "application/json"
+    }})
+
+    console:debugf("API: Add Asset to Album: %s -> %s", insertPayload, insertResponse)
+end
+
 return {
     getImmichAlbums = getImmichAlbums,
     createImmichAlbum = createImmichAlbum,
-    getPhotosInImmichAlbum = getPhotosInImmichAlbum
+    getPhotosInImmichAlbum = getPhotosInImmichAlbum,
+    addAssetToAlbumByOriginalPath = addAssetToAlbumByOriginalPath
 }
