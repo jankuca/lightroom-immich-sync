@@ -3,6 +3,7 @@ local LrApplication = import "LrApplication"
 local LrDialogs = import "LrDialogs"
 local ImmichAPI = require "ImmichAPI"
 local LrPrefs = import "LrPrefs"
+local LrTasks = import "LrTasks"
 
 local prefs = LrPrefs.prefsForPlugin()
 
@@ -19,7 +20,9 @@ end
 
 local function createLightroomAlbum(albumName)
     local catalog = LrApplication.activeCatalog()
-    catalog:createCollection(albumName, nil, true)
+    catalog:withWriteAccessDo("Create Album", function(context)
+        catalog:createCollection(albumName, nil, true)
+    end)
 end
 
 local function syncAlbums()
@@ -47,4 +50,6 @@ local function syncAlbums()
     LrDialogs.message("Album Sync Complete")
 end
 
-syncAlbums()
+LrTasks.startAsyncTask(function()
+    syncAlbums()
+end)
