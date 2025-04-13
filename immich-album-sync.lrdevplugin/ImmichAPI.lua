@@ -1,10 +1,13 @@
 -- ImmichAPI.lua - Handle API Calls to Immich
 local LrHttp = import "LrHttp"
+local LrLogger = import "LrLogger"
 local LrPrefs = import "LrPrefs"
 local LrPathUtils = import 'LrPathUtils'
 
 local dkjsonPath = LrPathUtils.child(_PLUGIN.path, "DkJson.lua")
 local json = dofile(dkjsonPath)
+
+local console = LrLogger("ImmichAlbumSync")
 
 local prefs = LrPrefs.prefsForPlugin()
 
@@ -14,6 +17,8 @@ local function getImmichAlbums()
         value = prefs.apiKey
     }})
 
+    console:debugf("API: Immich Albums: %s", response)
+
     local albums = {}
     if response then
         local data = json.decode(response)
@@ -21,10 +26,13 @@ local function getImmichAlbums()
             albums[album.albumName] = album.id
         end
     end
+
     return albums
 end
 
 local function createImmichAlbum(albumName)
+    console:infof("Creating album in Immich: %s", albumName)
+
     local payload = json.encode({
         name = albumName
     })
@@ -35,6 +43,9 @@ local function createImmichAlbum(albumName)
         field = "Content-Type",
         value = "application/json"
     }})
+
+    console:debugf("API: Create Immich Albums: %s", response)
+
     return response
 end
 
@@ -44,6 +55,7 @@ local function getPhotosInImmichAlbum(albumId)
         value = prefs.apiKey
     }})
 
+    console:debugf("API: Photos in Immich Album: %s", response)
     local data = json.decode(response)
 
     local photos = {}
@@ -53,6 +65,7 @@ local function getPhotosInImmichAlbum(albumId)
             photos[immichPath] = photo.id
         end
     end
+
     return photos
 end
 
