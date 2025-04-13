@@ -137,16 +137,16 @@ local function syncAlbums(options)
             end
 
             -- Add photos from Immich to Lightroom album:
-            for datedImmichPath, immichPath in pairs(immichPhotoDatedItems) do
+            for datedImmichPath, immichItem in pairs(immichPhotoDatedItems) do
                 if not lightroomPhotoDatedItems[datedImmichPath] then
-                    console:infof((isDryRun and "[DRY RUN] " or "") .. "Adding photo to Lightroom: %s", immichPath)
+                    console:infof((isDryRun and "[DRY RUN] " or "") .. "Adding photo to Lightroom: %s",
+                        immichItem.immichPhotoPath)
 
                     if not isDryRun then
-                        local basename = LrPathUtils.leafName(immichPath)
-                        local dateDirname, filename = basename:match("^(.-) %- (.+)$")
+                        local basename = LrPathUtils.leafName(immichItem.immichPhotoPath)
 
-                        if dateDirname and filename then
-                            local filenameWithoutExtension = filename:gsub("%.%w+$", "")
+                        if immichItem.dateDirname and immichItem.filename then
+                            local filenameWithoutExtension = immichItem.filename:gsub("%.%w+$", "")
 
                             local catalog = LrApplication.activeCatalog()
                             local photos = catalog:findPhotos({
@@ -159,7 +159,7 @@ local function syncAlbums(options)
                                     {
                                         criteria = "folder",
                                         operation = "==",
-                                        value = dateDirname
+                                        value = immichItem.dateDirname
                                     },
                                     combine = "intersect"
                                 }
@@ -180,7 +180,7 @@ local function syncAlbums(options)
                             if #filteredPhotos == 0 then
                                 console:infof((isDryRun and "[DRY RUN] " or "") ..
                                                   "Photo not found in Lightroom: immich path = %s, dateDirname = %s, filename = %s",
-                                    immichPath, dateDirname, filename)
+                                    immichItem.immichPhotoPath, immichItem.dateDirname, immichItem.filename)
                             else
                                 for _, photo in ipairs(filteredPhotos) do
                                     local photoPath = photo:getRawMetadata("path")
@@ -194,8 +194,8 @@ local function syncAlbums(options)
                             end
                         else
                             console:infof((isDryRun and "[DRY RUN] " or "") ..
-                                              "Invalid Immich path: %s -> dirname = %s, filename = %s", immichPath,
-                                dateDirname, filename)
+                                              "Invalid Immich path: %s -> dirname = %s, filename = %s",
+                                immichItem.immichPhotoPath, immichItem.dateDirname, immichItem.filename)
                         end
                     end
                 end
