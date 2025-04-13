@@ -2,8 +2,20 @@
 local LrDialogs = import "LrDialogs"
 local LrView = import "LrView"
 local LrPrefs = import "LrPrefs"
+local LrApplication = import "LrApplication"
 
 local prefs = LrPrefs.prefsForPlugin()
+
+local function getLightroomAlbums()
+    local catalog = LrApplication.activeCatalog()
+    local collections = catalog:getChildCollections()
+
+    local albumNames = {}
+    for _, collection in ipairs(collections) do
+        table.insert(albumNames, collection:getName())
+    end
+    return albumNames
+end
 
 local function showConfigDialog()
     local f = LrView.osFactory()

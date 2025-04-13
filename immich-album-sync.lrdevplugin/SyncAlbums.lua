@@ -36,12 +36,23 @@ local function syncAlbums()
     local lightroomAlbums = getLightroomAlbums()
     local immichAlbums = ImmichAPI.getImmichAlbums()
 
+    local selectedAlbums = {}
+    if prefs.syncSpecificAlbums and prefs.selectedAlbums then
+        console:info("Running in \"specific album only\" mode...")
+        console:debugf("Selected Albums: %s", prefs.selectedAlbums)
+        for album in string.gmatch(prefs.selectedAlbums, "[^;]+") do
+            local albumName = album:match("^%s*(.-)%s*$")
+            console:infof("Selected Album: %s", albumName)
+            selectedAlbums[albumName] = true
+        end
+    end
+
     -- Create missing albums in Lightroom
     if prefs.createAlbumsInLightroom then
         console:info("Creating missing albums in Lightroom...")
         for albumName, _ in pairs(immichAlbums) do
-            if not lightroomAlbums[albumName] then
             console:debugf("Checking album: %s", albumName)
+            if (not prefs.syncSpecificAlbums or selectedAlbums[albumName]) and not lightroomAlbums[albumName] then
                 createLightroomAlbum(albumName)
                 LrDialogs.message("Created album in Lightroom: " .. albumName)
             end
@@ -52,8 +63,8 @@ local function syncAlbums()
     if prefs.createAlbumsInImmich then
         console:info("Creating missing albums in Immich...")
         for albumName, _ in pairs(lightroomAlbums) do
-            if not immichAlbums[albumName] then
             console:debugf("Checking album: %s", albumName)
+            if (not prefs.syncSpecificAlbums or selectedAlbums[albumName]) and not immichAlbums[albumName] then
                 ImmichAPI.createImmichAlbum(albumName)
                 LrDialogs.message("Created album in Immich: " .. albumName)
             end
