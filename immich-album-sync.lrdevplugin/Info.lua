@@ -8,6 +8,9 @@ return {
         title = "Sync Albums with Immich",
         file = "SyncAlbums.lua"
     }, {
+        title = "Dry Run - Sync Albums with Immich",
+        file = "DryRunSyncAlbums.lua"
+    }, {
         title = "Immich Sync Settings",
         file = "ConfigDialog.lua"
     }}
