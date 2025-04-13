@@ -10,8 +10,8 @@ local prefs = LrPrefs.prefsForPlugin()
 
 local function getImmichAlbums()
     local response = LrHttp.get(prefs.immichURL .. "/api/albums", {{
-        field = "Authorization",
-        value = "Bearer " .. prefs.apiKey
+        field = "x-api-key",
+        value = prefs.apiKey
     }})
 
     local albums = {}
@@ -29,8 +29,8 @@ local function createImmichAlbum(albumName)
         name = albumName
     })
     local response = LrHttp.post(prefs.immichURL .. "/api/albums", payload, {{
-        field = "Authorization",
-        value = "Bearer " .. prefs.apiKey
+        field = "x-api-key",
+        value = prefs.apiKey
     }, {
         field = "Content-Type",
         value = "application/json"
@@ -40,8 +40,8 @@ end
 
 local function getPhotosInImmichAlbum(albumId)
     local response = LrHttp.get(prefs.immichURL .. "/api/albums/" .. albumId, {{
-        field = "Authorization",
-        value = "Bearer " .. prefs.apiKey
+        field = "x-api-key",
+        value = prefs.apiKey
     }})
 
     local photos = {}
