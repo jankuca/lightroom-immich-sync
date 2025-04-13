@@ -111,8 +111,13 @@ local function syncAlbums(options)
             local lightroomPhotos = lightroomAlbum:getPhotos()
             for _, photo in ipairs(lightroomPhotos) do
                 local photoPath = photo:getRawMetadata("path")
-                local datedPath = photoPath:match("(%d%d%d%d/(%d%d%d%d%-%d%d)?/%d%d%d%d%-%d%d%-%d%d/.+)$")
-                lightroomPhotoDatedItems[datedPath] = photoPath
+                local datedPath = photoPath:match(".*(%d%d%d%d%/%d%d%d%d%-%d%d%/%d%d%d%d%-%d%d%-%d%d%/.+)$")
+                if datedPath then
+                    lightroomPhotoDatedItems[datedPath] = photoPath
+                else
+                    console:infof((isDryRun and "[DRY RUN] " or "") ..
+                                      "Warning: Photo path does not match expected format: %s", photoPath)
+                end
             end
 
             -- Add photos from Lightroom to Immich album:
