@@ -44,12 +44,13 @@ local function getPhotosInImmichAlbum(albumId)
         value = prefs.apiKey
     }})
 
+    local data = json.decode(response)
+
     local photos = {}
     if response then
-        local data = json.decode(response)
-        for _, photo in ipairs(data.photos) do
+        for _, photo in ipairs(data.assets) do
             local immichPath = photo.originalPath
-            photos[immichPath] = true
+            photos[immichPath] = photo.id
         end
     end
     return photos
