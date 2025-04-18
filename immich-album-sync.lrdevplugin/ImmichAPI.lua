@@ -23,7 +23,14 @@ local function getImmichAlbums()
     if response then
         local data = json.decode(response)
         for _, album in ipairs(data) do
-            albums[album.albumName] = album.id
+            -- Store the full album object with metadata
+            albums[album.albumName] = {
+                id = album.id,
+                startDate = album.startDate,
+                endDate = album.endDate,
+                albumName = album.albumName,
+                albumInfo = album
+            }
         end
     end
 
@@ -46,7 +53,18 @@ local function createImmichAlbum(albumName)
 
     console:debugf("API: Create Immich Albums: %s", response)
 
-    return response
+    local data = json.decode(response)
+    if data then
+        return {
+            id = data.id,
+            startDate = data.startDate,
+            endDate = data.endDate,
+            albumName = data.albumName,
+            albumInfo = data
+        }
+    end
+
+    return nil
 end
 
 local function getPhotosInImmichAlbum(albumId)
@@ -59,14 +77,26 @@ local function getPhotosInImmichAlbum(albumId)
     local data = json.decode(response)
 
     local photos = {}
-    if response then
+    local albumData = {}
+
+    if response and data then
+        -- Extract album metadata
+        albumData = {
+            id = data.id,
+            startDate = data.startDate,
+            endDate = data.endDate,
+            albumName = data.albumName,
+            albumInfo = data
+        }
+
+        -- Extract photos
         for _, photo in ipairs(data.assets) do
             local immichPath = photo.originalPath
             photos[immichPath] = photo.id
         end
     end
 
-    return photos
+    return photos, albumData
 end
 
 -- Helper function to search for assets by path

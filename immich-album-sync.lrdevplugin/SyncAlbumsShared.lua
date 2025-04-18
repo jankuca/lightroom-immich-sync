@@ -109,9 +109,98 @@ local function renameLightroomAlbum(collection, newName, options)
     end
 end
 
+-- Function to find a collection set by name
+local function findCollectionSetByName(name, parentSet)
+    local catalog = LrApplication.activeCatalog()
+    local sets
+
+    if parentSet then
+        sets = parentSet:getChildCollectionSets()
+    else
+        sets = catalog:getChildCollectionSets()
+    end
+
+    for _, set in ipairs(sets) do
+        if set:getName() == name then
+            return set
+        end
+    end
+
+    return nil
+end
+
+-- Function to create a collection set
+local function createCollectionSet(name, parentSet, options)
+    local isDryRun = options and options.isDryRun or false
+    local catalog = LrApplication.activeCatalog()
+    local newSet
+
+    console:infof("%sCreating collection set: %s", getDryRunPrefix(isDryRun), name)
+
+    if not isDryRun then
+        catalog:withWriteAccessDo("Create Collection Set", function(context)
+            newSet = catalog:createCollectionSet(name, parentSet, true)
+        end)
+    end
+
+    return newSet
+end
+
+-- Function to find or create a collection set
+local function findOrCreateCollectionSet(name, parentSet, options)
+    local isDryRun = options and options.isDryRun or false
+    local set = findCollectionSetByName(name, parentSet)
+
+    if not set then
+        set = createCollectionSet(name, parentSet, {
+            isDryRun = isDryRun
+        })
+    end
+
+    return set
+end
+
+-- Function to find or create a year-based collection set
+local function findOrCreateYearCollectionSet(year, rootSet, options)
+    local isDryRun = options and options.isDryRun or false
+    return findOrCreateCollectionSet(tostring(year), rootSet, {
+        isDryRun = isDryRun
+    })
+end
+
+-- Function to get the root collection set based on user preferences
+local function getRootCollectionSet()
+    if prefs.rootCollectionSet and prefs.rootCollectionSet ~= "" then
+        return findCollectionSetByName(prefs.rootCollectionSet)
+    end
+
+    return nil
+end
+
 local function getLightroomAlbums()
     local catalog = LrApplication.activeCatalog()
-    local collections = catalog:getChildCollections()
+    local collections = {}
+    local rootSet = getRootCollectionSet()
+
+    if rootSet then
+        local rootCollections = rootSet:getChildCollections()
+        for _, collection in ipairs(rootCollections) do
+            table.insert(collections, collection)
+        end
+
+        -- If organizing by year, also check in year subfolders
+        if prefs.organizeByYear then
+            local yearSets = rootSet:getChildCollectionSets()
+            for _, yearSet in ipairs(yearSets) do
+                local yearCollections = yearSet:getChildCollections()
+                for _, collection in ipairs(yearCollections) do
+                    table.insert(collections, collection)
+                end
+            end
+        end
+    else
+        collections = catalog:getChildCollections()
+    end
 
     local albums = {}
     for _, collection in ipairs(collections) do
@@ -144,13 +233,35 @@ end
 
 local function createLightroomAlbum(albumName, options)
     local isDryRun = options and options.isDryRun or false
+    local startDate = options and options.startDate or nil
     console:infof("%sCreating album in Lightroom: %s", getDryRunPrefix(isDryRun), albumName)
 
     if not isDryRun then
         local catalog = LrApplication.activeCatalog()
-        catalog:withWriteAccessDo("Create Album", function(context)
-            catalog:createCollection(albumName, nil, true)
-        end)
+        local rootSet = getRootCollectionSet()
+        local parentSet = rootSet
+
+        -- If organizing by year and we have a start date, create/find year collection set
+        if prefs.organizeByYear and startDate and rootSet then
+            local year
+            if type(startDate) == "string" then
+                -- Extract year from ISO date string (YYYY-MM-DD)
+                year = startDate:match("^(%d%d%d%d)")
+            end
+
+            if year then
+                parentSet = findOrCreateYearCollectionSet(year, rootSet, {
+                    isDryRun = isDryRun
+                })
+                console:infof("%sPlacing album in year collection set: %s", getDryRunPrefix(isDryRun), year)
+            end
+        end
+
+        if not isDryRun then
+            catalog:withWriteAccessDo("Create Album", function(context)
+                catalog:createCollection(albumName, parentSet, true)
+            end)
+        end
     end
 end
 
@@ -228,7 +339,7 @@ local function syncAlbums(options)
                         end
 
                         if betterName ~= similarImmichName then
-                            local immichAlbumId = immichAlbumsCopy[similarImmichName]
+                            local immichAlbumData = immichAlbumsCopy[similarImmichName]
                             console:infof(getDryRunPrefix(isDryRun) .. "Updating Immich album name from '%s' to '%s'",
                                 similarImmichName, betterName)
 
@@ -236,9 +347,9 @@ local function syncAlbums(options)
 
                             if shouldRename then
                                 if not isDryRun then
-                                    ImmichAPI.updateImmichAlbumName(immichAlbumId, betterName)
+                                    ImmichAPI.updateImmichAlbumName(immichAlbumData.id, betterName)
                                     -- Update our local copy of the album list
-                                    immichAlbums[betterName] = immichAlbumId
+                                    immichAlbums[betterName] = immichAlbumData
                                     immichAlbums[similarImmichName] = nil
                                 end
                             else
@@ -266,11 +377,12 @@ local function syncAlbums(options)
     -- Create missing albums in Lightroom
     if prefs.createAlbumsInLightroom then
         console:info(getDryRunPrefix(isDryRun) .. "Creating missing albums in Lightroom...")
-        for albumName, _ in pairs(immichAlbums) do
+        for albumName, albumData in pairs(immichAlbums) do
             -- console:debugf(getDryRunPrefix(isDryRun) .. "Checking album: %s", albumName)
             if isAlbumSelected(albumName, selectedAlbums) and not lightroomAlbums[albumName] then
                 createLightroomAlbum(albumName, {
-                    isDryRun = isDryRun
+                    isDryRun = isDryRun,
+                    startDate = albumData.startDate
                 })
                 if not isDryRun then
                     LrDialogs.message("Created album in Lightroom: " .. albumName)
@@ -287,7 +399,10 @@ local function syncAlbums(options)
             if isAlbumSelected(albumName, selectedAlbums) and not immichAlbums[albumName] then
                 console:infof((isDryRun and "[DRY RUN] " or "") .. "Creating album in Immich: %s", albumName)
                 if not isDryRun then
-                    ImmichAPI.createImmichAlbum(albumName)
+                    -- Create album and get the album data back
+                    local albumData = ImmichAPI.createImmichAlbum(albumName)
+                    -- Add the newly created album to our list
+                    immichAlbums[albumName] = albumData
                     LrDialogs.message("Created album in Immich: " .. albumName)
                 end
             end
@@ -297,14 +412,14 @@ local function syncAlbums(options)
     -- Sync photo lists between Lightroom and Immich
     console:info(getDryRunPrefix(isDryRun) .. "Syncing photo lists between Lightroom and Immich...")
 
-    for albumName, immichAlbumId in pairs(immichAlbums) do
+    for albumName, albumData in pairs(immichAlbums) do
         local lightroomAlbum = lightroomAlbums[albumName]
 
         if isAlbumSelected(albumName, selectedAlbums) and lightroomAlbum then
             console:infof((isDryRun and "[DRY RUN] " or "") .. "Syncing photos for album: %s", albumName)
 
             -- Get photos in Immich album
-            local immichPhotos = ImmichAPI.getPhotosInImmichAlbum(immichAlbumId)
+            local immichPhotos = ImmichAPI.getPhotosInImmichAlbum(albumData.id)
             local immichPhotoDatedItems = {}
             for immichPhotoPath, photoId in pairs(immichPhotos) do
                 local datedPath = immichPhotoPath:match(

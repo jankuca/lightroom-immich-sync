@@ -3,6 +3,7 @@ local LrDialogs = import "LrDialogs"
 local LrView = import "LrView"
 local LrPrefs = import "LrPrefs"
 local LrApplication = import "LrApplication"
+local LrTasks = import "LrTasks"
 
 local prefs = LrPrefs.prefsForPlugin()
 
@@ -19,6 +20,14 @@ if prefs.confirmAlbumRenames == nil then
     prefs.confirmAlbumRenames = true
 end
 
+if prefs.rootCollectionSet == nil then
+    prefs.rootCollectionSet = ""
+end
+
+if prefs.organizeByYear == nil then
+    prefs.organizeByYear = false
+end
+
 local function getLightroomAlbums()
     local catalog = LrApplication.activeCatalog()
     local collections = catalog:getChildCollections()
@@ -30,7 +39,9 @@ local function getLightroomAlbums()
     return albumNames
 end
 
-local function showConfigDialog()
+-- Start the main task to show the config dialog
+LrTasks.startAsyncTask(function()
+
     local f = LrView.osFactory()
 
     local c = f:column{
@@ -107,6 +118,28 @@ local function showConfigDialog()
             immediate = true
         }},
 
+        f:separator{
+            fill_horizontal = 1
+        },
+
+        f:static_text{
+            title = "Lightroom Collection Organization",
+            font = "<system/bold>"
+        },
+
+        f:row{f:static_text{
+            title = "Root Collection Set Name:"
+        }, f:edit_field{
+            value = LrView.bind("rootCollectionSet"),
+            width_in_chars = 30,
+            immediate = true
+        }},
+
+        f:row{f:checkbox{
+            title = "Organize albums by year",
+            value = LrView.bind("organizeByYear")
+        }},
+
         f:row{f:push_button{
             title = "Save Settings",
             action = function()
@@ -115,10 +148,10 @@ local function showConfigDialog()
         }}
     }
 
+    -- Show the dialog
     LrDialogs.presentModalDialog {
         title = "Immich Album Sync Settings",
         contents = c
     }
-end
 
-showConfigDialog()
+end)
