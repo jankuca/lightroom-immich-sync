@@ -125,9 +125,14 @@ local function isAlbumSelected(albumName, selectedAlbums)
     return not prefs.syncSpecificAlbums or selectedAlbums[albumName]
 end
 
+-- Helper function to get the dry run prefix for log messages
+local function getDryRunPrefix(isDryRun)
+    return isDryRun and "[DRY RUN] " or ""
+end
+
 local function createLightroomAlbum(albumName, options)
     local isDryRun = options and options.isDryRun or false
-    console:infof("%sCreating album in Lightroom: %s", isDryRun and "[DRY RUN] " or "", albumName)
+    console:infof("%sCreating album in Lightroom: %s", getDryRunPrefix(isDryRun), albumName)
 
     if not isDryRun then
         local catalog = LrApplication.activeCatalog()
@@ -139,26 +144,25 @@ end
 
 local function syncAlbums(options)
     local isDryRun = options and options.isDryRun or false
-    console:infof('%sStarting album sync%s', isDryRun and "[DRY RUN] " or "",
-        isDryRun and " (no changes will be made)" or "")
+    console:infof('%sStarting album sync%s', getDryRunPrefix(isDryRun), isDryRun and " (no changes will be made)" or "")
 
     local lightroomAlbums = getLightroomAlbums()
     local immichAlbums = ImmichAPI.getImmichAlbums()
 
     local selectedAlbums = {}
     if prefs.syncSpecificAlbums and prefs.selectedAlbums then
-        console:info((isDryRun and "[DRY RUN] " or "") .. "Running in \"specific album only\" mode...")
-        console:debugf((isDryRun and "[DRY RUN] " or "") .. "Selected Albums: %s", prefs.selectedAlbums)
+        console:info(getDryRunPrefix(isDryRun) .. "Running in \"specific album only\" mode...")
+        console:debugf(getDryRunPrefix(isDryRun) .. "Selected Albums: %s", prefs.selectedAlbums)
         for album in string.gmatch(prefs.selectedAlbums, "[^;]+") do
             local albumName = album:match("^%s*(.-)%s*$")
-            console:infof((isDryRun and "[DRY RUN] " or "") .. "Selected Album: %s", albumName)
+            console:infof(getDryRunPrefix(isDryRun) .. "Selected Album: %s", albumName)
             selectedAlbums[albumName] = true
         end
     end
 
     -- Sync album names between Lightroom and Immich if enabled
     if prefs.syncAlbumNames then
-        console:info((isDryRun and "[DRY RUN] " or "") .. "Syncing album names between Lightroom and Immich...")
+        console:info(getDryRunPrefix(isDryRun) .. "Syncing album names between Lightroom and Immich...")
 
         -- First, create a copy of the album lists to track changes
         local lightroomAlbumsCopy = {}
@@ -187,17 +191,17 @@ local function syncAlbums(options)
                         -- Check if the Immich album is in the selected albums list when specific albums are enabled
                         local immichAlbumSelected = isAlbumSelected(similarImmichName, selectedAlbums)
 
-                        console:infof((isDryRun and "[DRY RUN] " or "") ..
+                        console:infof(getDryRunPrefix(isDryRun) ..
                                           "Found similar album names - Lightroom: '%s', Immich: '%s', Similarity: %.2f",
                             lrAlbumName, similarImmichName, similarity)
 
                         -- Only proceed if both albums are selected or specific album sync is disabled
                         if immichAlbumSelected then
-                            console:debugf((isDryRun and "[DRY RUN] " or "") .. "Both albums are selected for syncing.")
+                            console:debugf(getDryRunPrefix(isDryRun) .. "Both albums are selected for syncing.")
 
                             -- Determine which name is better (longer)
                             local betterName = getBetterAlbumName(lrAlbumName, similarImmichName)
-                            console:infof((isDryRun and "[DRY RUN] " or "") .. "Using better name: '%s'", betterName)
+                            console:infof(getDryRunPrefix(isDryRun) .. "Using better name: '%s'", betterName)
 
                             -- Update names in both systems if needed
                             if betterName ~= lrAlbumName then
@@ -213,7 +217,7 @@ local function syncAlbums(options)
 
                             if betterName ~= similarImmichName then
                                 local immichAlbumId = immichAlbumsCopy[similarImmichName]
-                                console:infof((isDryRun and "[DRY RUN] " or "") ..
+                                console:infof(getDryRunPrefix(isDryRun) ..
                                                   "Updating Immich album name from '%s' to '%s'", similarImmichName,
                                     betterName)
 
@@ -230,7 +234,7 @@ local function syncAlbums(options)
                             processedAlbums[similarImmichName] = true
                             processedAlbums[betterName] = true
                         else
-                            console:infof((isDryRun and "[DRY RUN] " or "") ..
+                            console:infof(getDryRunPrefix(isDryRun) ..
                                               "Skipping album name sync for '%s' and '%s' because one or both are not in the selected albums list.",
                                 lrAlbumName, similarImmichName)
                         end
@@ -238,14 +242,16 @@ local function syncAlbums(options)
                 end
             end
         end
+    else
+        console:info(getDryRunPrefix(isDryRun) .. "Album name syncing is disabled. Skipping...")
     end
 
     -- Create missing albums in Lightroom
     if prefs.createAlbumsInLightroom then
-        console:info((isDryRun and "[DRY RUN] " or "") .. "Creating missing albums in Lightroom...")
+        console:info(getDryRunPrefix(isDryRun) .. "Creating missing albums in Lightroom...")
         for albumName, _ in pairs(immichAlbums) do
-            console:debugf((isDryRun and "[DRY RUN] " or "") .. "Checking album: %s", albumName)
-            if (not prefs.syncSpecificAlbums or selectedAlbums[albumName]) and not lightroomAlbums[albumName] then
+            console:debugf(getDryRunPrefix(isDryRun) .. "Checking album: %s", albumName)
+            if isAlbumSelected(albumName, selectedAlbums) and not lightroomAlbums[albumName] then
                 createLightroomAlbum(albumName, {
                     isDryRun = isDryRun
                 })
@@ -258,7 +264,7 @@ local function syncAlbums(options)
 
     -- Create missing albums in Immich
     if prefs.createAlbumsInImmich then
-        console:info((isDryRun and "[DRY RUN] " or "") .. "Creating missing albums in Immich...")
+        console:info(getDryRunPrefix(isDryRun) .. "Creating missing albums in Immich...")
         for albumName, _ in pairs(lightroomAlbums) do
             console:debugf((isDryRun and "[DRY RUN] " or "") .. "Checking album: %s", albumName)
             if isAlbumSelected(albumName, selectedAlbums) and not immichAlbums[albumName] then
@@ -272,7 +278,7 @@ local function syncAlbums(options)
     end
 
     -- Sync photo lists between Lightroom and Immich
-    console:info((isDryRun and "[DRY RUN] " or "") .. "Syncing photo lists between Lightroom and Immich...")
+    console:info(getDryRunPrefix(isDryRun) .. "Syncing photo lists between Lightroom and Immich...")
 
     for albumName, immichAlbumId in pairs(immichAlbums) do
         local lightroomAlbum = lightroomAlbums[albumName]
