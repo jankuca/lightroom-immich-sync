@@ -237,7 +237,7 @@ local function syncAlbums(options)
     if prefs.createAlbumsInLightroom then
         console:info(getDryRunPrefix(isDryRun) .. "Creating missing albums in Lightroom...")
         for albumName, _ in pairs(immichAlbums) do
-            console:debugf(getDryRunPrefix(isDryRun) .. "Checking album: %s", albumName)
+            -- console:debugf(getDryRunPrefix(isDryRun) .. "Checking album: %s", albumName)
             if isAlbumSelected(albumName, selectedAlbums) and not lightroomAlbums[albumName] then
                 createLightroomAlbum(albumName, {
                     isDryRun = isDryRun
@@ -253,7 +253,7 @@ local function syncAlbums(options)
     if prefs.createAlbumsInImmich then
         console:info(getDryRunPrefix(isDryRun) .. "Creating missing albums in Immich...")
         for albumName, _ in pairs(lightroomAlbums) do
-            console:debugf((isDryRun and "[DRY RUN] " or "") .. "Checking album: %s", albumName)
+            -- console:debugf((isDryRun and "[DRY RUN] " or "") .. "Checking album: %s", albumName)
             if isAlbumSelected(albumName, selectedAlbums) and not immichAlbums[albumName] then
                 console:infof((isDryRun and "[DRY RUN] " or "") .. "Creating album in Immich: %s", albumName)
                 if not isDryRun then
