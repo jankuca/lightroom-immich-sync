@@ -429,9 +429,13 @@ local function syncAlbums(options)
                 if not isDryRun then
                     -- Create album and get the album data back
                     local albumData = ImmichAPI.createImmichAlbum(albumName)
-                    -- Add the newly created album to our list
-                    immichAlbums[albumName] = albumData
-                    console:infof("Created album in Immich: %s", albumName)
+                    if albumData then
+                        -- Add the newly created album to our list
+                        immichAlbums[albumName] = albumData
+                        console:infof("Created album in Immich: %s", albumName)
+                    else
+                        console:errorf("Failed to create album in Immich: %s", albumName)
+                    end
                 end
             end
         end

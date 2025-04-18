@@ -41,7 +41,7 @@ local function createImmichAlbum(albumName)
     console:infof("Creating album in Immich: %s", albumName)
 
     local payload = json.encode({
-        name = albumName
+        albumName = albumName
     })
     local response = LrHttp.post(prefs.immichURL .. "/api/albums", payload, {{
         field = "x-api-key",
