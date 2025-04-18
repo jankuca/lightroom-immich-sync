@@ -102,7 +102,12 @@ local function syncAlbums(options)
                 if datedPath then
                     local basename = LrPathUtils.leafName(datedPath)
                     local dateDirname, filename = basename:match("^(.-) %- (.+)$")
-                    immichPhotoDatedItems[filename] = {immichPhotoPath, dateDirname, filename, basename}
+                    immichPhotoDatedItems[filename] = {
+                        immichPhotoPath = immichPhotoPath,
+                        dateDirname = dateDirname,
+                        filename = filename,
+                        basename = basename
+                    }
                 end
             end
 
@@ -131,7 +136,15 @@ local function syncAlbums(options)
                         local dateDirname = LrPathUtils.leafName(
                             LrPathUtils.parent(LrPathUtils.parent(LrPathUtils.parent(lrPath))))
 
-                        ImmichAPI.addAssetToAlbumByOriginalPath(immichAlbumId, dateDirname .. " - " .. filename)
+                        -- Choose function based on user preference
+                        if prefs.ignoreFileExtensions then
+                            -- Use the function that ignores file extensions
+                            ImmichAPI.addAssetToAlbumByOriginalPathWithoutExtension(immichAlbumId,
+                                dateDirname .. " - " .. filename)
+                        else
+                            -- Use the original function that requires exact match
+                            ImmichAPI.addAssetToAlbumByOriginalPath(immichAlbumId, dateDirname .. " - " .. filename)
+                        end
                     end
                 end
             end

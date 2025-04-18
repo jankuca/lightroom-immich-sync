@@ -64,6 +64,11 @@ local function showConfigDialog()
             value = LrView.bind("createAlbumsInImmich")
         }},
 
+        f:row{f:checkbox{
+            title = "Ignore file extensions when matching photos",
+            value = LrView.bind("ignoreFileExtensions")
+        }},
+
         f:row{f:push_button{
             title = "Save Settings",
             action = function()

@@ -69,11 +69,10 @@ local function getPhotosInImmichAlbum(albumId)
     return photos
 end
 
-local function addAssetToAlbumByOriginalPath(albumId, assetOriginalPath)
-    console:infof("Adding asset to album: %s -> %s", assetOriginalPath, albumId)
-
+-- Helper function to search for assets by path
+local function searchAssetsByPath(searchPath, logMessage)
     local searchPayload = json.encode({
-        originalPath = assetOriginalPath
+        originalPath = searchPath
     })
     local searchResponse = LrHttp.post(prefs.immichURL .. "/api/search/metadata", searchPayload, {{
         field = "x-api-key",
@@ -83,37 +82,91 @@ local function addAssetToAlbumByOriginalPath(albumId, assetOriginalPath)
         value = "application/json"
     }})
 
-    console:debugf("API: Search Asset by Original Path: %s -> %s", assetOriginalPath, searchResponse)
+    console:debugf(logMessage, searchPath, searchResponse)
 
-    local data = json.decode(searchResponse)
-    local assetIds = {}
-    for _, asset in ipairs(data.assets.items) do
-        assetIds[asset.id] = asset.originalPath
+    return json.decode(searchResponse)
+end
+
+-- Helper function to add assets to an album
+local function addAssetsToAlbum(albumId, assetIdList)
+    if #assetIdList > 0 then
+        local insertPayload = json.encode({
+            ids = assetIdList
+        })
+        local insertResponse = LrHttp.post(prefs.immichURL .. "/api/albums/" .. albumId .. "/assets", insertPayload, {{
+            field = "x-api-key",
+            value = prefs.apiKey
+        }, {
+            field = "Content-Type",
+            value = "application/json"
+        }}, 'PUT')
+
+        console:debugf("API: Add Asset to Album: %s -> %s", insertPayload, insertResponse)
+        return true
+    else
+        return false
     end
+end
 
+-- Function to add asset to album by exact original path
+local function addAssetToAlbumByOriginalPath(albumId, assetOriginalPath)
+    console:infof("Adding asset to album: %s -> %s", assetOriginalPath, albumId)
+
+    -- Search for assets with exact path
+    local data = searchAssetsByPath(assetOriginalPath, "API: Search Asset by Original Path: %s -> %s")
+
+    -- Collect asset IDs
     local assetIdList = {}
-    for assetId, _ in pairs(assetIds) do
-        console:debugf("Adding asset to album: %s -> %s", assetId, albumId)
-        table.insert(assetIdList, assetId)
+    for _, asset in ipairs(data.assets.items) do
+        console:debugf("Found matching asset: %s", asset.originalPath)
+        table.insert(assetIdList, asset.id)
     end
 
-    local insertPayload = json.encode({
-        ids = assetIdList
-    })
-    local insertResponse = LrHttp.post(prefs.immichURL .. "/api/albums/" .. albumId .. "/assets", insertPayload, {{
-        field = "x-api-key",
-        value = prefs.apiKey
-    }, {
-        field = "Content-Type",
-        value = "application/json"
-    }}, 'PUT')
+    -- Add assets to album
+    if not addAssetsToAlbum(albumId, assetIdList) then
+        console:infof("No matching assets found for: %s", assetOriginalPath)
+    end
+end
 
-    console:debugf("API: Add Asset to Album: %s -> %s", insertPayload, insertResponse)
+-- Function to add asset to album by original path without considering file extension
+local function addAssetToAlbumByOriginalPathWithoutExtension(albumId, assetOriginalPath)
+    console:infof("Adding asset to album (ignoring extension): %s -> %s", assetOriginalPath, albumId)
+
+    -- Extract the filename and remove the extension
+    local filename = LrPathUtils.leafName(assetOriginalPath)
+    local filenameWithoutExtension = filename:gsub("%.%w+$", "")
+
+    -- Get the path without the filename
+    local pathWithoutFilename = string.sub(assetOriginalPath, 1, #assetOriginalPath - #filename)
+    local searchPath = pathWithoutFilename .. filenameWithoutExtension
+
+    -- Search for the file using a partial path (without extension)
+    local data = searchAssetsByPath(searchPath, "API: Search Asset by Original Path (without extension): %s -> %s")
+
+    -- Collect asset IDs with filename matching (ignoring extension)
+    local assetIdList = {}
+    for _, asset in ipairs(data.assets.items) do
+        -- Extract the filename from the asset's original path
+        local assetFilename = LrPathUtils.leafName(asset.originalPath)
+        local assetFilenameWithoutExt = assetFilename:gsub("%.%w+$", "")
+
+        -- Check if the base filenames match (ignoring extension)
+        if assetFilenameWithoutExt == filenameWithoutExtension then
+            console:debugf("Found matching asset (ignoring extension): %s", asset.originalPath)
+            table.insert(assetIdList, asset.id)
+        end
+    end
+
+    -- Add assets to album
+    if not addAssetsToAlbum(albumId, assetIdList) then
+        console:infof("No matching assets found for: %s", assetOriginalPath)
+    end
 end
 
 return {
     getImmichAlbums = getImmichAlbums,
     createImmichAlbum = createImmichAlbum,
     getPhotosInImmichAlbum = getPhotosInImmichAlbum,
-    addAssetToAlbumByOriginalPath = addAssetToAlbumByOriginalPath
+    addAssetToAlbumByOriginalPath = addAssetToAlbumByOriginalPath,
+    addAssetToAlbumByOriginalPathWithoutExtension = addAssetToAlbumByOriginalPathWithoutExtension
 }
