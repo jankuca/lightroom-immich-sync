@@ -15,6 +15,10 @@ if prefs.syncAlbumNames == nil then
     prefs.syncAlbumNames = true
 end
 
+if prefs.confirmAlbumRenames == nil then
+    prefs.confirmAlbumRenames = true
+end
+
 local function getLightroomAlbums()
     local catalog = LrApplication.activeCatalog()
     local collections = catalog:getChildCollections()
@@ -76,6 +80,11 @@ local function showConfigDialog()
         f:row{f:checkbox{
             title = "Sync album names (match similar names)",
             value = LrView.bind("syncAlbumNames")
+        }},
+
+        f:row{f:checkbox{
+            title = "Confirm album renames",
+            value = LrView.bind("confirmAlbumRenames")
         }},
 
         f:row{f:checkbox{

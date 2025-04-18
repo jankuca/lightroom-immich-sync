@@ -75,7 +75,7 @@ local function findSimilarAlbumName(albumName, albumList, similarityThreshold)
     for candidateName, _ in pairs(albumList) do
         if candidateName ~= albumName then -- Skip exact matches
             local similarity = calculateSimilarity(albumName, candidateName)
-            console:debugf("Similarity between '%s' and '%s': %.2f", albumName, candidateName, similarity)
+            -- console:debugf("Similarity between '%s' and '%s': %.2f", albumName, candidateName, similarity)
             if similarity > threshold and similarity > bestSimilarity then
                 bestMatch = candidateName
                 bestSimilarity = similarity
@@ -128,6 +128,18 @@ end
 -- Helper function to get the dry run prefix for log messages
 local function getDryRunPrefix(isDryRun)
     return isDryRun and "[DRY RUN] " or ""
+end
+
+-- Helper function to show a confirmation dialog for album renaming
+local function confirmAlbumRename(source, oldName, newName)
+    -- If confirmation is disabled, always return true
+    if not prefs.confirmAlbumRenames then
+        return true
+    end
+
+    local message = string.format("Do you want to rename the %s album?\n\nFrom: %s\nTo: %s", source, oldName, newName)
+    local result = LrDialogs.confirm("Confirm Album Rename", message, "Rename")
+    return result == "ok"
 end
 
 local function createLightroomAlbum(albumName, options)
@@ -198,13 +210,20 @@ local function syncAlbums(options)
 
                         -- Update names in both systems if needed
                         if betterName ~= lrAlbumName then
-                            renameLightroomAlbum(lrCollection, betterName, {
-                                isDryRun = isDryRun
-                            })
-                            if not isDryRun then
-                                -- Update our local copy of the album list
-                                lightroomAlbums[betterName] = lrCollection
-                                lightroomAlbums[lrAlbumName] = nil
+                            local shouldRename = confirmAlbumRename("Lightroom", lrAlbumName, betterName)
+
+                            if shouldRename then
+                                renameLightroomAlbum(lrCollection, betterName, {
+                                    isDryRun = isDryRun
+                                })
+                                if not isDryRun then
+                                    -- Update our local copy of the album list
+                                    lightroomAlbums[betterName] = lrCollection
+                                    lightroomAlbums[lrAlbumName] = nil
+                                end
+                            else
+                                console:infof("User declined to rename Lightroom album from '%s' to '%s'", lrAlbumName,
+                                    betterName)
                             end
                         end
 
@@ -213,18 +232,29 @@ local function syncAlbums(options)
                             console:infof(getDryRunPrefix(isDryRun) .. "Updating Immich album name from '%s' to '%s'",
                                 similarImmichName, betterName)
 
-                            if not isDryRun then
-                                ImmichAPI.updateImmichAlbumName(immichAlbumId, betterName)
-                                -- Update our local copy of the album list
-                                immichAlbums[betterName] = immichAlbumId
-                                immichAlbums[similarImmichName] = nil
+                            local shouldRename = confirmAlbumRename("Immich", similarImmichName, betterName)
+
+                            if shouldRename then
+                                if not isDryRun then
+                                    ImmichAPI.updateImmichAlbumName(immichAlbumId, betterName)
+                                    -- Update our local copy of the album list
+                                    immichAlbums[betterName] = immichAlbumId
+                                    immichAlbums[similarImmichName] = nil
+                                end
+                            else
+                                console:infof("User declined to rename Immich album from '%s' to '%s'",
+                                    similarImmichName, betterName)
                             end
                         end
 
-                        -- Mark both albums as processed
+                        -- Mark the original albums as processed to avoid processing them again
                         processedAlbums[lrAlbumName] = true
                         processedAlbums[similarImmichName] = true
-                        processedAlbums[betterName] = true
+
+                        -- If either album was renamed, mark the new name as processed too
+                        if betterName ~= lrAlbumName or betterName ~= similarImmichName then
+                            processedAlbums[betterName] = true
+                        end
                     end
                 end
             end
