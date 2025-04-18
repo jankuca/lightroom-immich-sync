@@ -343,8 +343,8 @@ local function syncAlbums(options)
                     if not isDryRun then
                         -- get leaf and the most nested folder name
                         local filename = LrPathUtils.leafName(lrPath)
-                        local dateDirname = LrPathUtils.leafName(
-                            LrPathUtils.parent(LrPathUtils.parent(LrPathUtils.parent(lrPath))))
+                        -- Extract the full date (YYYY-MM-DD) from the path
+                        local dateDirname = lrPath:match(".*(%d%d%d%d%-%d%d%-%d%d)/")
 
                         -- Choose function based on user preference
                         if prefs.ignoreFileExtensions then
