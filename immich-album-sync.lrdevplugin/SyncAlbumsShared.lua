@@ -11,6 +11,11 @@ console:enable("print") -- Logs will be written to a file
 
 local prefs = LrPrefs.prefsForPlugin()
 
+-- Helper function to get the dry run prefix for log messages
+local function getDryRunPrefix(isDryRun)
+    return isDryRun and "[DRY RUN] " or ""
+end
+
 -- Levenshtein distance function to calculate string similarity
 local function levenshteinDistance(str1, str2)
     local len1, len2 = #str1, #str2
@@ -49,6 +54,16 @@ local function normalizeAlbumName(name)
     return normalized
 end
 
+-- Function to check if two album names only differ in numeric parts
+local function onlyDifferInNumericParts(name1, name2)
+    -- Replace all numeric sequences with a placeholder in both names
+    local nonNumeric1 = string.lower(name1):gsub("%d+", "NUM")
+    local nonNumeric2 = string.lower(name2):gsub("%d+", "NUM")
+
+    -- If the non-numeric parts are identical, the names only differ in numbers
+    return nonNumeric1 == nonNumeric2
+end
+
 -- Function to calculate similarity between two album names
 local function calculateSimilarity(name1, name2)
     local normalized1 = normalizeAlbumName(name1)
@@ -74,11 +89,17 @@ local function findSimilarAlbumName(albumName, albumList, similarityThreshold)
 
     for candidateName, _ in pairs(albumList) do
         if candidateName ~= albumName then -- Skip exact matches
-            local similarity = calculateSimilarity(albumName, candidateName)
-            -- console:debugf("Similarity between '%s' and '%s': %.2f", albumName, candidateName, similarity)
-            if similarity > threshold and similarity > bestSimilarity then
-                bestMatch = candidateName
-                bestSimilarity = similarity
+            -- Skip if the names only differ in numeric parts
+            if not onlyDifferInNumericParts(albumName, candidateName) then
+                local similarity = calculateSimilarity(albumName, candidateName)
+                -- console:debugf("Similarity between '%s' and '%s': %.2f", albumName, candidateName, similarity)
+                if similarity > threshold and similarity > bestSimilarity then
+                    bestMatch = candidateName
+                    bestSimilarity = similarity
+                end
+            else
+                console:debugf("Skipping match between '%s' and '%s' as they only differ in numeric parts", albumName,
+                    candidateName)
             end
         end
     end
@@ -207,11 +228,6 @@ local function getLightroomAlbums()
         albums[collection:getName()] = collection
     end
     return albums
-end
-
--- Helper function to get the dry run prefix for log messages
-local function getDryRunPrefix(isDryRun)
-    return isDryRun and "[DRY RUN] " or ""
 end
 
 -- Helper function to check if an album is selected for syncing
