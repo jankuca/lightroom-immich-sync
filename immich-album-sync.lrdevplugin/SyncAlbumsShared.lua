@@ -188,56 +188,43 @@ local function syncAlbums(options)
                     local similarImmichName, similarity = findSimilarAlbumName(lrAlbumName, immichAlbumsCopy, threshold)
 
                     if similarImmichName then
-                        -- Check if the Immich album is in the selected albums list when specific albums are enabled
-                        local immichAlbumSelected = isAlbumSelected(similarImmichName, selectedAlbums)
-
                         console:infof(getDryRunPrefix(isDryRun) ..
                                           "Found similar album names - Lightroom: '%s', Immich: '%s', Similarity: %.2f",
                             lrAlbumName, similarImmichName, similarity)
 
-                        -- Only proceed if both albums are selected or specific album sync is disabled
-                        if immichAlbumSelected then
-                            console:debugf(getDryRunPrefix(isDryRun) .. "Both albums are selected for syncing.")
+                        -- Determine which name is better (longer)
+                        local betterName = getBetterAlbumName(lrAlbumName, similarImmichName)
+                        console:infof(getDryRunPrefix(isDryRun) .. "Using better name: '%s'", betterName)
 
-                            -- Determine which name is better (longer)
-                            local betterName = getBetterAlbumName(lrAlbumName, similarImmichName)
-                            console:infof(getDryRunPrefix(isDryRun) .. "Using better name: '%s'", betterName)
-
-                            -- Update names in both systems if needed
-                            if betterName ~= lrAlbumName then
-                                renameLightroomAlbum(lrCollection, betterName, {
-                                    isDryRun = isDryRun
-                                })
-                                if not isDryRun then
-                                    -- Update our local copy of the album list
-                                    lightroomAlbums[betterName] = lrCollection
-                                    lightroomAlbums[lrAlbumName] = nil
-                                end
+                        -- Update names in both systems if needed
+                        if betterName ~= lrAlbumName then
+                            renameLightroomAlbum(lrCollection, betterName, {
+                                isDryRun = isDryRun
+                            })
+                            if not isDryRun then
+                                -- Update our local copy of the album list
+                                lightroomAlbums[betterName] = lrCollection
+                                lightroomAlbums[lrAlbumName] = nil
                             end
-
-                            if betterName ~= similarImmichName then
-                                local immichAlbumId = immichAlbumsCopy[similarImmichName]
-                                console:infof(getDryRunPrefix(isDryRun) ..
-                                                  "Updating Immich album name from '%s' to '%s'", similarImmichName,
-                                    betterName)
-
-                                if not isDryRun then
-                                    ImmichAPI.updateImmichAlbumName(immichAlbumId, betterName)
-                                    -- Update our local copy of the album list
-                                    immichAlbums[betterName] = immichAlbumId
-                                    immichAlbums[similarImmichName] = nil
-                                end
-                            end
-
-                            -- Mark both albums as processed
-                            processedAlbums[lrAlbumName] = true
-                            processedAlbums[similarImmichName] = true
-                            processedAlbums[betterName] = true
-                        else
-                            console:infof(getDryRunPrefix(isDryRun) ..
-                                              "Skipping album name sync for '%s' and '%s' because one or both are not in the selected albums list.",
-                                lrAlbumName, similarImmichName)
                         end
+
+                        if betterName ~= similarImmichName then
+                            local immichAlbumId = immichAlbumsCopy[similarImmichName]
+                            console:infof(getDryRunPrefix(isDryRun) .. "Updating Immich album name from '%s' to '%s'",
+                                similarImmichName, betterName)
+
+                            if not isDryRun then
+                                ImmichAPI.updateImmichAlbumName(immichAlbumId, betterName)
+                                -- Update our local copy of the album list
+                                immichAlbums[betterName] = immichAlbumId
+                                immichAlbums[similarImmichName] = nil
+                            end
+                        end
+
+                        -- Mark both albums as processed
+                        processedAlbums[lrAlbumName] = true
+                        processedAlbums[similarImmichName] = true
+                        processedAlbums[betterName] = true
                     end
                 end
             end
