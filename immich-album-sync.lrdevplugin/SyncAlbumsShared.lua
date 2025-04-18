@@ -309,44 +309,38 @@ local function syncAlbums(options)
     local isDryRun = options and options.isDryRun or false
     console:infof('%sStarting album sync%s', getDryRunPrefix(isDryRun), isDryRun and " (no changes will be made)" or "")
 
-    -- Create main progress scope for the entire sync process
-    local mainScope = LrProgressScope({
-        title = isDryRun and "Dry Run - Album Sync" or "Album Sync",
-        functionContext = options and options.functionContext
-    })
-
     console:infof("%sStarting album sync with progress indicator and cancelation support", getDryRunPrefix(isDryRun))
 
     -- Phase 1: Getting album lists
-    local listScope = LrProgressScope({
+    local progressScope = LrProgressScope({
         title = "Getting album lists",
-        parent = mainScope
+        functionContext = options and options.functionContext
     })
-    listScope:setCaption("Getting Lightroom albums...")
-    listScope:setPortionComplete(0, 2)
+    progressScope:setCaption("Getting Lightroom albums...")
+    progressScope:setPortionComplete(0, 2)
 
     local lightroomAlbums = getLightroomAlbums()
 
     -- Check for cancelation
-    if listScope:isCanceled() then
+    if progressScope:isCanceled() then
         console:infof("Sync canceled during 'Getting album lists' phase")
-        mainScope:done()
+        progressScope:done()
         return
     end
 
-    listScope:setCaption("Getting Immich albums...")
-    listScope:setPortionComplete(1, 2)
+    progressScope:setCaption("Getting Immich albums...")
+    progressScope:setPortionComplete(1, 2)
 
     local immichAlbums = ImmichAPI.getImmichAlbums()
 
     -- Check for cancelation
-    if listScope:isCanceled() then
+    if progressScope:isCanceled() then
         console:infof("Sync canceled during 'Getting album lists' phase")
-        mainScope:done()
+        progressScope:done()
         return
     end
 
-    listScope:done()
+    progressScope:done()
 
     local selectedAlbums = {}
     if prefs.syncSpecificAlbums and prefs.selectedAlbums then
@@ -364,9 +358,9 @@ local function syncAlbums(options)
         console:info(getDryRunPrefix(isDryRun) .. "Syncing album names between Lightroom and Immich...")
 
         -- Phase 2: Syncing album names
-        local nameScope = LrProgressScope({
+        progressScope = LrProgressScope({
             title = "Syncing album names",
-            parent = mainScope
+            functionContext = options and options.functionContext
         })
 
         -- First, create a copy of the album lists to track changes
@@ -392,13 +386,13 @@ local function syncAlbums(options)
 
         for lrAlbumName, lrCollection in pairs(lightroomAlbumsCopy) do
             processedCount = processedCount + 1
-            nameScope:setPortionComplete(processedCount, albumCount)
-            nameScope:setCaption("Checking album: " .. lrAlbumName)
+            progressScope:setPortionComplete(processedCount, albumCount)
+            progressScope:setCaption("Checking album: " .. lrAlbumName)
 
             -- Check for cancelation
-            if nameScope:isCanceled() then
+            if progressScope:isCanceled() then
                 console:infof("Sync canceled during 'Syncing album names' phase while checking album: %s", lrAlbumName)
-                mainScope:done()
+                progressScope:done()
                 return
             end
             if not processedAlbums[lrAlbumName] and isAlbumSelected(lrAlbumName, selectedAlbums) then
@@ -469,7 +463,7 @@ local function syncAlbums(options)
             end
         end
 
-        nameScope:done()
+        progressScope:done()
     else
         console:info(getDryRunPrefix(isDryRun) .. "Album name syncing is disabled. Skipping...")
     end
@@ -479,9 +473,9 @@ local function syncAlbums(options)
         console:info(getDryRunPrefix(isDryRun) .. "Creating missing albums in Lightroom...")
 
         -- Phase 3: Creating albums in Lightroom
-        local lrCreateScope = LrProgressScope({
+        progressScope = LrProgressScope({
             title = "Creating albums in Lightroom",
-            parent = mainScope
+            functionContext = options and options.functionContext
         })
         local albumCount = 0
         local albumsToCreate = {}
@@ -502,14 +496,14 @@ local function syncAlbums(options)
             local albumName = album.name
             local albumData = album.data
 
-            lrCreateScope:setPortionComplete(i - 1, albumCount)
-            lrCreateScope:setCaption("Creating album: " .. albumName)
+            progressScope:setPortionComplete(i - 1, albumCount)
+            progressScope:setCaption("Creating album: " .. albumName)
 
             -- Check for cancelation
-            if lrCreateScope:isCanceled() then
+            if progressScope:isCanceled() then
                 console:infof("Sync canceled during 'Creating albums in Lightroom' phase while creating album: %s",
                     albumName)
-                mainScope:done()
+                progressScope:done()
                 return
             end
             -- Album is already filtered in the loop above
@@ -527,7 +521,7 @@ local function syncAlbums(options)
             end
         end
 
-        lrCreateScope:done()
+        progressScope:done()
     end
 
     -- Create missing albums in Immich
@@ -535,9 +529,9 @@ local function syncAlbums(options)
         console:info(getDryRunPrefix(isDryRun) .. "Creating missing albums in Immich...")
 
         -- Phase 4: Creating albums in Immich
-        local immichCreateScope = LrProgressScope({
+        progressScope = LrProgressScope({
             title = "Creating albums in Immich",
-            parent = mainScope
+            functionContext = options and options.functionContext
         })
         local albumCount = 0
         local albumsToCreate = {}
@@ -552,14 +546,14 @@ local function syncAlbums(options)
 
         -- Then create them with progress updates
         for i, albumName in ipairs(albumsToCreate) do
-            immichCreateScope:setPortionComplete(i - 1, albumCount)
-            immichCreateScope:setCaption("Creating album: " .. albumName)
+            progressScope:setPortionComplete(i - 1, albumCount)
+            progressScope:setCaption("Creating album: " .. albumName)
 
             -- Check for cancelation
-            if immichCreateScope:isCanceled() then
+            if progressScope:isCanceled() then
                 console:infof("Sync canceled during 'Creating albums in Immich' phase while creating album: %s",
                     albumName)
-                mainScope:done()
+                progressScope:done()
                 return
             end
             -- Album is already filtered in the loop above
@@ -577,16 +571,16 @@ local function syncAlbums(options)
             end
         end
 
-        immichCreateScope:done()
+        progressScope:done()
     end
 
     -- Sync photo lists between Lightroom and Immich
     console:info(getDryRunPrefix(isDryRun) .. "Syncing photo lists between Lightroom and Immich...")
 
     -- Phase 5: Syncing photos
-    local photoSyncScope = LrProgressScope({
+    progressScope = LrProgressScope({
         title = "Syncing photos",
-        parent = mainScope
+        functionContext = options and options.functionContext
     })
 
     -- Count albums to sync
@@ -609,15 +603,15 @@ local function syncAlbums(options)
         local albumData = album.data
         local lightroomAlbum = album.lrAlbum
 
-        photoSyncScope:setCaption("Syncing album (" .. albumName .. ")")
+        progressScope:setCaption("Syncing album (" .. albumName .. ")")
         -- Reset progress for each album
-        photoSyncScope:setPortionComplete(0, 1)
+        progressScope:setPortionComplete(0, 1)
         console:infof((isDryRun and "[DRY RUN] " or "") .. "Syncing photos for album: %s", albumName)
 
         -- Check for cancelation
-        if photoSyncScope:isCanceled() then
+        if progressScope:isCanceled() then
             console:infof("Sync canceled during 'Syncing photos' phase while starting to sync album: %s", albumName)
-            mainScope:done()
+            progressScope:done()
             return
         end
 
@@ -671,12 +665,12 @@ local function syncAlbums(options)
             local lrPath = photoInfo.fullPath
 
             -- Update progress within this album's photo sync
-            photoSyncScope:setPortionComplete(idx, totalPhotosToProcess)
+            progressScope:setPortionComplete(idx, totalPhotosToProcess)
 
             -- Check for cancelation
-            if photoSyncScope:isCanceled() then
+            if progressScope:isCanceled() then
                 console:infof("Sync canceled during 'Syncing photos' phase while adding photo to Immich: %s", lrPath)
-                mainScope:done()
+                progressScope:done()
                 return
             end
             -- Already filtered in the loop above
@@ -718,13 +712,13 @@ local function syncAlbums(options)
             local immichItem = photoInfo.item
 
             -- Update progress within this album's photo sync
-            photoSyncScope:setPortionComplete(idx + #lrPhotosToAdd, totalImmichPhotos + #lrPhotosToAdd)
+            progressScope:setPortionComplete(idx + #lrPhotosToAdd, totalImmichPhotos + #lrPhotosToAdd)
 
             -- Check for cancelation
-            if photoSyncScope:isCanceled() then
+            if progressScope:isCanceled() then
                 console:infof("Sync canceled during 'Syncing photos' phase while adding photo to Lightroom: %s",
                     immichItem.immichPhotoPath)
-                mainScope:done()
+                progressScope:done()
                 return
             end
             -- Already filtered in the loop above
@@ -790,10 +784,7 @@ local function syncAlbums(options)
         end
     end
 
-    photoSyncScope:done()
-
-    -- Complete the main progress scope
-    mainScope:done()
+    progressScope:done()
 
     console:infof("%sAlbum sync completed successfully", getDryRunPrefix(isDryRun))
 
