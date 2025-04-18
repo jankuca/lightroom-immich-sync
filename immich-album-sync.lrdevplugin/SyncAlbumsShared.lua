@@ -489,7 +489,8 @@ local function syncAlbums(options)
             local lightroomPhotos = lightroomAlbum:getPhotos()
             for _, photo in ipairs(lightroomPhotos) do
                 local photoPath = photo:getRawMetadata("path")
-                local datedPath = photoPath:match(".*(%d%d%d%d%/%d%d%d%d%-%d%d%/%d%d%d%d%-%d%d%-%d%d%/.+)$")
+                local datedPath = photoPath:match(".*(%d%d%d%d%/%d%d%d%d%-%d%d%/%d%d%d%d%-%d%d%-%d%d%/.+)$") or
+                                      photoPath:match(".*(%d%d%d%d%/%d%d%d%d%-%d%d%-%d%d%/.+)$")
                 if datedPath then
                     lightroomPhotoDatedItems[datedPath] = photoPath
                 else
