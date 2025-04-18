@@ -120,6 +120,11 @@ local function getLightroomAlbums()
     return albums
 end
 
+-- Helper function to check if an album is selected for syncing
+local function isAlbumSelected(albumName, selectedAlbums)
+    return not prefs.syncSpecificAlbums or selectedAlbums[albumName]
+end
+
 local function createLightroomAlbum(albumName, options)
     local isDryRun = options and options.isDryRun or false
     console:infof("%sCreating album in Lightroom: %s", isDryRun and "[DRY RUN] " or "", albumName)
@@ -171,7 +176,7 @@ local function syncAlbums(options)
 
         -- For each Lightroom album, find similar albums in Immich
         for lrAlbumName, lrCollection in pairs(lightroomAlbumsCopy) do
-            if not processedAlbums[lrAlbumName] and (not prefs.syncSpecificAlbums or selectedAlbums[lrAlbumName]) then
+            if not processedAlbums[lrAlbumName] and isAlbumSelected(lrAlbumName, selectedAlbums) then
                 -- Skip if exact match exists (will be handled by regular sync)
                 if not immichAlbums[lrAlbumName] then
                     -- Use user-defined threshold or default to 0.7
@@ -180,7 +185,7 @@ local function syncAlbums(options)
 
                     if similarImmichName then
                         -- Check if the Immich album is in the selected albums list when specific albums are enabled
-                        local immichAlbumSelected = not prefs.syncSpecificAlbums or selectedAlbums[similarImmichName]
+                        local immichAlbumSelected = isAlbumSelected(similarImmichName, selectedAlbums)
 
                         console:infof((isDryRun and "[DRY RUN] " or "") ..
                                           "Found similar album names - Lightroom: '%s', Immich: '%s', Similarity: %.2f",
@@ -256,7 +261,7 @@ local function syncAlbums(options)
         console:info((isDryRun and "[DRY RUN] " or "") .. "Creating missing albums in Immich...")
         for albumName, _ in pairs(lightroomAlbums) do
             console:debugf((isDryRun and "[DRY RUN] " or "") .. "Checking album: %s", albumName)
-            if (not prefs.syncSpecificAlbums or selectedAlbums[albumName]) and not immichAlbums[albumName] then
+            if isAlbumSelected(albumName, selectedAlbums) and not immichAlbums[albumName] then
                 console:infof((isDryRun and "[DRY RUN] " or "") .. "Creating album in Immich: %s", albumName)
                 if not isDryRun then
                     ImmichAPI.createImmichAlbum(albumName)
@@ -272,7 +277,7 @@ local function syncAlbums(options)
     for albumName, immichAlbumId in pairs(immichAlbums) do
         local lightroomAlbum = lightroomAlbums[albumName]
 
-        if (not prefs.syncSpecificAlbums or selectedAlbums[albumName]) and lightroomAlbum then
+        if isAlbumSelected(albumName, selectedAlbums) and lightroomAlbum then
             console:infof((isDryRun and "[DRY RUN] " or "") .. "Syncing photos for album: %s", albumName)
 
             -- Get photos in Immich album
