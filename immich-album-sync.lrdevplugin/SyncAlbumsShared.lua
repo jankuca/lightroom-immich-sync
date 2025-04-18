@@ -11,6 +11,104 @@ console:enable("print") -- Logs will be written to a file
 
 local prefs = LrPrefs.prefsForPlugin()
 
+-- Levenshtein distance function to calculate string similarity
+local function levenshteinDistance(str1, str2)
+    local len1, len2 = #str1, #str2
+    local matrix = {}
+
+    -- Initialize the matrix
+    for i = 0, len1 do
+        matrix[i] = {
+            [0] = i
+        }
+    end
+    for j = 0, len2 do
+        matrix[0][j] = j
+    end
+
+    -- Fill the matrix
+    for i = 1, len1 do
+        for j = 1, len2 do
+            local cost = (str1:sub(i, i) == str2:sub(j, j)) and 0 or 1
+            matrix[i][j] = math.min(matrix[i - 1][j] + 1, -- deletion
+            matrix[i][j - 1] + 1, -- insertion
+            matrix[i - 1][j - 1] + cost -- substitution
+            )
+        end
+    end
+
+    return matrix[len1][len2]
+end
+
+-- Function to normalize album names for comparison
+local function normalizeAlbumName(name)
+    -- Convert to lowercase
+    local normalized = string.lower(name)
+    -- Remove common separators (spaces, dashes, underscores)
+    normalized = normalized:gsub("[%s%-_]", "")
+    return normalized
+end
+
+-- Function to calculate similarity between two album names
+local function calculateSimilarity(name1, name2)
+    local normalized1 = normalizeAlbumName(name1)
+    local normalized2 = normalizeAlbumName(name2)
+
+    -- Calculate Levenshtein distance
+    local distance = levenshteinDistance(normalized1, normalized2)
+
+    -- Calculate similarity score (0 to 1, where 1 is identical)
+    local maxLength = math.max(#normalized1, #normalized2)
+    if maxLength == 0 then
+        return 1
+    end -- Both strings are empty
+
+    return 1 - (distance / maxLength)
+end
+
+-- Function to find similar album names
+local function findSimilarAlbumName(albumName, albumList, similarityThreshold)
+    local threshold = similarityThreshold or 0.7 -- Default threshold
+    local bestMatch = nil
+    local bestSimilarity = 0
+
+    for candidateName, _ in pairs(albumList) do
+        if candidateName ~= albumName then -- Skip exact matches
+            local similarity = calculateSimilarity(albumName, candidateName)
+            console:debugf("Similarity between '%s' and '%s': %.2f", albumName, candidateName, similarity)
+            if similarity > threshold and similarity > bestSimilarity then
+                bestMatch = candidateName
+                bestSimilarity = similarity
+            end
+        end
+    end
+
+    return bestMatch, bestSimilarity
+end
+
+-- Function to determine which album name is better (prefer longer name)
+local function getBetterAlbumName(name1, name2)
+    if #name1 >= #name2 then
+        return name1
+    else
+        return name2
+    end
+end
+
+-- Function to rename a Lightroom album
+local function renameLightroomAlbum(collection, newName, options)
+    local isDryRun = options and options.isDryRun or false
+    console:infof("%sRenaming Lightroom album from '%s' to '%s'", isDryRun and "[DRY RUN] " or "", collection:getName(),
+        newName)
+
+    if not isDryRun then
+        local catalog = LrApplication.activeCatalog()
+        catalog:withWriteAccessDo("Rename Album", function(context)
+            collection:setName(newName)
+        end)
+    end
+end
+
 local function getLightroomAlbums()
     local catalog = LrApplication.activeCatalog()
     local collections = catalog:getChildCollections()
@@ -50,6 +148,90 @@ local function syncAlbums(options)
             local albumName = album:match("^%s*(.-)%s*$")
             console:infof((isDryRun and "[DRY RUN] " or "") .. "Selected Album: %s", albumName)
             selectedAlbums[albumName] = true
+        end
+    end
+
+    -- Sync album names between Lightroom and Immich if enabled
+    if prefs.syncAlbumNames then
+        console:info((isDryRun and "[DRY RUN] " or "") .. "Syncing album names between Lightroom and Immich...")
+
+        -- First, create a copy of the album lists to track changes
+        local lightroomAlbumsCopy = {}
+        for name, collection in pairs(lightroomAlbums) do
+            lightroomAlbumsCopy[name] = collection
+        end
+
+        local immichAlbumsCopy = {}
+        for name, id in pairs(immichAlbums) do
+            immichAlbumsCopy[name] = id
+        end
+
+        -- Track albums that have been processed to avoid duplicate operations
+        local processedAlbums = {}
+
+        -- For each Lightroom album, find similar albums in Immich
+        for lrAlbumName, lrCollection in pairs(lightroomAlbumsCopy) do
+            if not processedAlbums[lrAlbumName] and (not prefs.syncSpecificAlbums or selectedAlbums[lrAlbumName]) then
+                -- Skip if exact match exists (will be handled by regular sync)
+                if not immichAlbums[lrAlbumName] then
+                    -- Use user-defined threshold or default to 0.7
+                    local threshold = tonumber(prefs.albumSimilarityThreshold) or 0.7
+                    local similarImmichName, similarity = findSimilarAlbumName(lrAlbumName, immichAlbumsCopy, threshold)
+
+                    if similarImmichName then
+                        -- Check if the Immich album is in the selected albums list when specific albums are enabled
+                        local immichAlbumSelected = not prefs.syncSpecificAlbums or selectedAlbums[similarImmichName]
+
+                        console:infof((isDryRun and "[DRY RUN] " or "") ..
+                                          "Found similar album names - Lightroom: '%s', Immich: '%s', Similarity: %.2f",
+                            lrAlbumName, similarImmichName, similarity)
+
+                        -- Only proceed if both albums are selected or specific album sync is disabled
+                        if immichAlbumSelected then
+                            console:debugf((isDryRun and "[DRY RUN] " or "") .. "Both albums are selected for syncing.")
+
+                            -- Determine which name is better (longer)
+                            local betterName = getBetterAlbumName(lrAlbumName, similarImmichName)
+                            console:infof((isDryRun and "[DRY RUN] " or "") .. "Using better name: '%s'", betterName)
+
+                            -- Update names in both systems if needed
+                            if betterName ~= lrAlbumName then
+                                renameLightroomAlbum(lrCollection, betterName, {
+                                    isDryRun = isDryRun
+                                })
+                                if not isDryRun then
+                                    -- Update our local copy of the album list
+                                    lightroomAlbums[betterName] = lrCollection
+                                    lightroomAlbums[lrAlbumName] = nil
+                                end
+                            end
+
+                            if betterName ~= similarImmichName then
+                                local immichAlbumId = immichAlbumsCopy[similarImmichName]
+                                console:infof((isDryRun and "[DRY RUN] " or "") ..
+                                                  "Updating Immich album name from '%s' to '%s'", similarImmichName,
+                                    betterName)
+
+                                if not isDryRun then
+                                    ImmichAPI.updateImmichAlbumName(immichAlbumId, betterName)
+                                    -- Update our local copy of the album list
+                                    immichAlbums[betterName] = immichAlbumId
+                                    immichAlbums[similarImmichName] = nil
+                                end
+                            end
+
+                            -- Mark both albums as processed
+                            processedAlbums[lrAlbumName] = true
+                            processedAlbums[similarImmichName] = true
+                            processedAlbums[betterName] = true
+                        else
+                            console:infof((isDryRun and "[DRY RUN] " or "") ..
+                                              "Skipping album name sync for '%s' and '%s' because one or both are not in the selected albums list.",
+                                lrAlbumName, similarImmichName)
+                        end
+                    end
+                end
+            end
         end
     end
 

@@ -6,6 +6,15 @@ local LrApplication = import "LrApplication"
 
 local prefs = LrPrefs.prefsForPlugin()
 
+-- Set default values if not already set
+if not prefs.albumSimilarityThreshold then
+    prefs.albumSimilarityThreshold = "0.7"
+end
+
+if prefs.syncAlbumNames == nil then
+    prefs.syncAlbumNames = true
+end
+
 local function getLightroomAlbums()
     local catalog = LrApplication.activeCatalog()
     local collections = catalog:getChildCollections()
@@ -65,8 +74,28 @@ local function showConfigDialog()
         }},
 
         f:row{f:checkbox{
+            title = "Sync album names (match similar names)",
+            value = LrView.bind("syncAlbumNames")
+        }},
+
+        f:row{f:checkbox{
             title = "Ignore file extensions when matching photos",
             value = LrView.bind("ignoreFileExtensions")
+        }},
+
+        f:row{f:static_text{
+            title = "Album name similarity threshold (0.0-1.0):"
+        }, f:edit_field{
+            value = LrView.bind("albumSimilarityThreshold"),
+            width_in_chars = 5,
+            validate = function(view, value)
+                local num = tonumber(value)
+                if not num or num < 0 or num > 1 then
+                    return false, "Please enter a number between 0.0 and 1.0"
+                end
+                return true
+            end,
+            immediate = true
         }},
 
         f:row{f:push_button{

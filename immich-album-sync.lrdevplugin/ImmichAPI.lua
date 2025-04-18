@@ -163,10 +163,31 @@ local function addAssetToAlbumByOriginalPathWithoutExtension(albumId, assetOrigi
     end
 end
 
+-- Function to update an album name in Immich
+local function updateImmichAlbumName(albumId, newName)
+    console:infof("Updating album name in Immich: %s -> %s", albumId, newName)
+
+    local payload = json.encode({
+        albumName = newName
+    })
+    local response = LrHttp.post(prefs.immichURL .. "/api/albums/" .. albumId, payload, {{
+        field = "x-api-key",
+        value = prefs.apiKey
+    }, {
+        field = "Content-Type",
+        value = "application/json"
+    }}, 'PATCH')
+
+    console:debugf("API: Update Immich Album Name: %s -> %s", payload, response)
+
+    return response
+end
+
 return {
     getImmichAlbums = getImmichAlbums,
     createImmichAlbum = createImmichAlbum,
     getPhotosInImmichAlbum = getPhotosInImmichAlbum,
     addAssetToAlbumByOriginalPath = addAssetToAlbumByOriginalPath,
-    addAssetToAlbumByOriginalPathWithoutExtension = addAssetToAlbumByOriginalPathWithoutExtension
+    addAssetToAlbumByOriginalPathWithoutExtension = addAssetToAlbumByOriginalPathWithoutExtension,
+    updateImmichAlbumName = updateImmichAlbumName
 }
