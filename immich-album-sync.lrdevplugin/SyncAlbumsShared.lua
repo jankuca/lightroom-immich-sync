@@ -255,6 +255,8 @@ local function createLightroomAlbum(albumName, options)
     local startDate = options and options.startDate or nil
     console:infof("%sCreating album in Lightroom: %s", getDryRunPrefix(isDryRun), albumName)
 
+    local newAlbum = nil
+
     if not isDryRun then
         local catalog = LrApplication.activeCatalog()
         local rootSet = getRootCollectionSet()
@@ -278,10 +280,12 @@ local function createLightroomAlbum(albumName, options)
 
         if not isDryRun then
             catalog:withWriteAccessDo("Create Album", function(context)
-                catalog:createCollection(albumName, parentSet, true)
+                newAlbum = catalog:createCollection(albumName, parentSet, true)
             end)
         end
     end
+
+    return newAlbum
 end
 
 local function syncAlbums(options)
@@ -399,12 +403,17 @@ local function syncAlbums(options)
         for albumName, albumData in pairs(immichAlbums) do
             -- console:debugf(getDryRunPrefix(isDryRun) .. "Checking album: %s", albumName)
             if isAlbumSelected(albumName, selectedAlbums) and not lightroomAlbums[albumName] then
-                createLightroomAlbum(albumName, {
+                local newAlbum = createLightroomAlbum(albumName, {
                     isDryRun = isDryRun,
                     startDate = albumData.startDate
                 })
                 if not isDryRun then
-                    LrDialogs.message("Created album in Lightroom: " .. albumName)
+                    -- Add the newly created album to our list so it will be included in photo syncing
+                    if newAlbum then
+                        lightroomAlbums[albumName] = newAlbum
+                        console:infof("Added newly created album '%s' to the list for photo syncing", albumName)
+                    end
+                    console:infof("Created album in Lightroom: %s", albumName)
                 end
             end
         end
@@ -422,7 +431,7 @@ local function syncAlbums(options)
                     local albumData = ImmichAPI.createImmichAlbum(albumName)
                     -- Add the newly created album to our list
                     immichAlbums[albumName] = albumData
-                    LrDialogs.message("Created album in Immich: " .. albumName)
+                    console:infof("Created album in Immich: %s", albumName)
                 end
             end
         end
@@ -483,11 +492,11 @@ local function syncAlbums(options)
                         -- Choose function based on user preference
                         if prefs.ignoreFileExtensions then
                             -- Use the function that ignores file extensions
-                            ImmichAPI.addAssetToAlbumByOriginalPathWithoutExtension(immichAlbumId,
+                            ImmichAPI.addAssetToAlbumByOriginalPathWithoutExtension(albumData.id,
                                 dateDirname .. " - " .. filename)
                         else
                             -- Use the original function that requires exact match
-                            ImmichAPI.addAssetToAlbumByOriginalPath(immichAlbumId, dateDirname .. " - " .. filename)
+                            ImmichAPI.addAssetToAlbumByOriginalPath(albumData.id, dateDirname .. " - " .. filename)
                         end
                     end
                 end
