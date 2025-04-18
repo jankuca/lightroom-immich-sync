@@ -624,11 +624,18 @@ local function syncAlbums(options)
             if datedPath then
                 local basename = LrPathUtils.leafName(datedPath)
                 local dateDirname, filename = basename:match("^(.-) %- (.+)$")
-                immichPhotoDatedItems[filename] = {
+
+                -- Create a key that combines date and filename (without extension) for matching
+                local filenameWithoutExt = filename:gsub("\.%w+$", "")
+                local matchKey = dateDirname .. " - " .. filenameWithoutExt
+
+                immichPhotoDatedItems[matchKey] = {
                     immichPhotoPath = immichPhotoPath,
                     dateDirname = dateDirname,
                     filename = filename,
-                    basename = basename
+                    filenameWithoutExt = filenameWithoutExt,
+                    basename = basename,
+                    matchKey = matchKey
                 }
             end
         end
@@ -641,7 +648,25 @@ local function syncAlbums(options)
             local datedPath = photoPath:match(".*(%d%d%d%d%/%d%d%d%d%-%d%d%/%d%d%d%d%-%d%d%-%d%d%/.+)$") or
                                   photoPath:match(".*(%d%d%d%d%/%d%d%d%d%-%d%d%-%d%d%/.+)$")
             if datedPath then
-                lightroomPhotoDatedItems[datedPath] = photoPath
+                -- Extract the filename and date from the path
+                local filename = LrPathUtils.leafName(datedPath)
+                local filenameWithoutExt = filename:gsub("\.%w+$", "")
+
+                -- Extract the date (YYYY-MM-DD) from the path
+                local dateDirname = photoPath:match(".*(%d%d%d%d%-%d%d%-%d%d)/")
+
+                -- Create a key that combines date and filename (without extension) for matching
+                -- This matches the Immich format with the date and filename
+                local matchKey = dateDirname .. " - " .. filenameWithoutExt
+
+                lightroomPhotoDatedItems[matchKey] = {
+                    datedPath = datedPath,
+                    fullPath = photoPath,
+                    filename = filename,
+                    filenameWithoutExt = filenameWithoutExt,
+                    dateDirname = dateDirname,
+                    matchKey = matchKey
+                }
             else
                 console:infof((isDryRun and "[DRY RUN] " or "") ..
                                   "Warning: Photo path does not match expected format: %s", photoPath)
@@ -650,11 +675,18 @@ local function syncAlbums(options)
 
         -- Add photos from Lightroom to Immich album:
         local lrPhotosToAdd = {}
-        for datedLrPath, lrPath in pairs(lightroomPhotoDatedItems) do
-            if not immichPhotoDatedItems[datedLrPath] then
+        for matchKey, lrPhotoInfo in pairs(lightroomPhotoDatedItems) do
+            -- Check if this photo exists in Immich by comparing the match keys directly
+            -- The matchKey is already in the format "YYYY-MM-DD/filename"
+
+            -- Check if this photo exists in Immich
+            if not immichPhotoDatedItems[matchKey] then
+                -- Not found in Immich, add to the list
                 table.insert(lrPhotosToAdd, {
-                    path = datedLrPath,
-                    fullPath = lrPath
+                    path = lrPhotoInfo.datedPath,
+                    fullPath = lrPhotoInfo.fullPath,
+                    dateDirname = lrPhotoInfo.dateDirname,
+                    filename = lrPhotoInfo.filename
                 })
             end
         end
@@ -697,10 +729,15 @@ local function syncAlbums(options)
 
         -- Add photos from Immich to Lightroom album:
         local immichPhotosToAdd = {}
-        for datedImmichPath, immichItem in pairs(immichPhotoDatedItems) do
-            if not lightroomPhotoDatedItems[datedImmichPath] then
+        for matchKey, immichItem in pairs(immichPhotoDatedItems) do
+            -- Check if this photo exists in Lightroom by comparing the match keys directly
+            -- The matchKey is already in the format "YYYY-MM-DD - filename"
+
+            -- Check if this photo exists in Lightroom
+            if not lightroomPhotoDatedItems[matchKey] then
+                -- Not found in Lightroom, add to the list
                 table.insert(immichPhotosToAdd, {
-                    path = datedImmichPath,
+                    path = immichItem.matchKey,
                     item = immichItem
                 })
             end
