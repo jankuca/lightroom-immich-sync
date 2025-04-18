@@ -223,14 +223,14 @@ local function isAlbumSelected(albumName, selectedAlbums)
 
     -- Check for exact match first
     if selectedAlbums[albumName] then
-        console:debugf("Album '%s' matched exactly", albumName)
+        -- console:debugf("Album '%s' matched exactly", albumName)
         return true
     end
 
     -- Check for substring match
     for selectedAlbumName, _ in pairs(selectedAlbums) do
         if string.find(albumName, selectedAlbumName, 1, true) then
-            console:debugf("Album '%s' matched by substring '%s'", albumName, selectedAlbumName)
+            -- console:debugf("Album '%s' matched by substring '%s'", albumName, selectedAlbumName)
             return true
         end
     end
