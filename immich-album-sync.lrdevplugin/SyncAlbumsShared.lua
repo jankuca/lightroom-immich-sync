@@ -5,6 +5,7 @@ local ImmichAPI = require "ImmichAPI"
 local LrLogger = import "LrLogger"
 local LrPrefs = import "LrPrefs"
 local LrPathUtils = import "LrPathUtils"
+local LrProgressScope = import "LrProgressScope"
 
 local console = LrLogger("ImmichAlbumSync")
 console:enable("print") -- Logs will be written to a file
@@ -308,8 +309,44 @@ local function syncAlbums(options)
     local isDryRun = options and options.isDryRun or false
     console:infof('%sStarting album sync%s', getDryRunPrefix(isDryRun), isDryRun and " (no changes will be made)" or "")
 
+    -- Create main progress scope for the entire sync process
+    local mainScope = LrProgressScope({
+        title = isDryRun and "Dry Run - Album Sync" or "Album Sync",
+        functionContext = options and options.functionContext
+    })
+
+    console:infof("%sStarting album sync with progress indicator and cancelation support", getDryRunPrefix(isDryRun))
+
+    -- Phase 1: Getting album lists
+    local listScope = LrProgressScope({
+        title = "Getting album lists",
+        parent = mainScope
+    })
+    listScope:setCaption("Getting Lightroom albums...")
+    listScope:setPortionComplete(0, 2)
+
     local lightroomAlbums = getLightroomAlbums()
+
+    -- Check for cancelation
+    if listScope:isCanceled() then
+        console:infof("Sync canceled during 'Getting album lists' phase")
+        mainScope:done()
+        return
+    end
+
+    listScope:setCaption("Getting Immich albums...")
+    listScope:setPortionComplete(1, 2)
+
     local immichAlbums = ImmichAPI.getImmichAlbums()
+
+    -- Check for cancelation
+    if listScope:isCanceled() then
+        console:infof("Sync canceled during 'Getting album lists' phase")
+        mainScope:done()
+        return
+    end
+
+    listScope:done()
 
     local selectedAlbums = {}
     if prefs.syncSpecificAlbums and prefs.selectedAlbums then
@@ -326,6 +363,12 @@ local function syncAlbums(options)
     if prefs.syncAlbumNames then
         console:info(getDryRunPrefix(isDryRun) .. "Syncing album names between Lightroom and Immich...")
 
+        -- Phase 2: Syncing album names
+        local nameScope = LrProgressScope({
+            title = "Syncing album names",
+            parent = mainScope
+        })
+
         -- First, create a copy of the album lists to track changes
         local lightroomAlbumsCopy = {}
         for name, collection in pairs(lightroomAlbums) do
@@ -341,7 +384,23 @@ local function syncAlbums(options)
         local processedAlbums = {}
 
         -- For each Lightroom album, find similar albums in Immich
+        local albumCount = 0
+        for _ in pairs(lightroomAlbumsCopy) do
+            albumCount = albumCount + 1
+        end
+        local processedCount = 0
+
         for lrAlbumName, lrCollection in pairs(lightroomAlbumsCopy) do
+            processedCount = processedCount + 1
+            nameScope:setPortionComplete(processedCount, albumCount)
+            nameScope:setCaption("Checking album: " .. lrAlbumName)
+
+            -- Check for cancelation
+            if nameScope:isCanceled() then
+                console:infof("Sync canceled during 'Syncing album names' phase while checking album: %s", lrAlbumName)
+                mainScope:done()
+                return
+            end
             if not processedAlbums[lrAlbumName] and isAlbumSelected(lrAlbumName, selectedAlbums) then
                 -- Skip if exact match exists (will be handled by regular sync)
                 if not immichAlbums[lrAlbumName] then
@@ -409,6 +468,8 @@ local function syncAlbums(options)
                 end
             end
         end
+
+        nameScope:done()
     else
         console:info(getDryRunPrefix(isDryRun) .. "Album name syncing is disabled. Skipping...")
     end
@@ -416,179 +477,325 @@ local function syncAlbums(options)
     -- Create missing albums in Lightroom
     if prefs.createAlbumsInLightroom then
         console:info(getDryRunPrefix(isDryRun) .. "Creating missing albums in Lightroom...")
+
+        -- Phase 3: Creating albums in Lightroom
+        local lrCreateScope = LrProgressScope({
+            title = "Creating albums in Lightroom",
+            parent = mainScope
+        })
+        local albumCount = 0
+        local albumsToCreate = {}
+
+        -- First count albums that need to be created
         for albumName, albumData in pairs(immichAlbums) do
-            -- console:debugf(getDryRunPrefix(isDryRun) .. "Checking album: %s", albumName)
             if isAlbumSelected(albumName, selectedAlbums) and not lightroomAlbums[albumName] then
-                local newAlbum = createLightroomAlbum(albumName, {
-                    isDryRun = isDryRun,
-                    startDate = albumData.startDate
+                albumCount = albumCount + 1
+                table.insert(albumsToCreate, {
+                    name = albumName,
+                    data = albumData
                 })
-                if not isDryRun then
-                    -- Add the newly created album to our list so it will be included in photo syncing
-                    if newAlbum then
-                        lightroomAlbums[albumName] = newAlbum
-                        console:infof("Added newly created album '%s' to the list for photo syncing", albumName)
-                    end
-                    console:infof("Created album in Lightroom: %s", albumName)
-                end
             end
         end
+
+        -- Then create them with progress updates
+        for i, album in ipairs(albumsToCreate) do
+            local albumName = album.name
+            local albumData = album.data
+
+            lrCreateScope:setPortionComplete(i - 1, albumCount)
+            lrCreateScope:setCaption("Creating album: " .. albumName)
+
+            -- Check for cancelation
+            if lrCreateScope:isCanceled() then
+                console:infof("Sync canceled during 'Creating albums in Lightroom' phase while creating album: %s",
+                    albumName)
+                mainScope:done()
+                return
+            end
+            -- Album is already filtered in the loop above
+            local newAlbum = createLightroomAlbum(albumName, {
+                isDryRun = isDryRun,
+                startDate = albumData.startDate
+            })
+            if not isDryRun then
+                -- Add the newly created album to our list so it will be included in photo syncing
+                if newAlbum then
+                    lightroomAlbums[albumName] = newAlbum
+                    console:infof("Added newly created album '%s' to the list for photo syncing", albumName)
+                end
+                console:infof("Created album in Lightroom: %s", albumName)
+            end
+        end
+
+        lrCreateScope:done()
     end
 
     -- Create missing albums in Immich
     if prefs.createAlbumsInImmich then
         console:info(getDryRunPrefix(isDryRun) .. "Creating missing albums in Immich...")
+
+        -- Phase 4: Creating albums in Immich
+        local immichCreateScope = LrProgressScope({
+            title = "Creating albums in Immich",
+            parent = mainScope
+        })
+        local albumCount = 0
+        local albumsToCreate = {}
+
+        -- First count albums that need to be created
         for albumName, _ in pairs(lightroomAlbums) do
-            -- console:debugf((isDryRun and "[DRY RUN] " or "") .. "Checking album: %s", albumName)
             if isAlbumSelected(albumName, selectedAlbums) and not immichAlbums[albumName] then
-                console:infof((isDryRun and "[DRY RUN] " or "") .. "Creating album in Immich: %s", albumName)
-                if not isDryRun then
-                    -- Create album and get the album data back
-                    local albumData = ImmichAPI.createImmichAlbum(albumName)
-                    if albumData then
-                        -- Add the newly created album to our list
-                        immichAlbums[albumName] = albumData
-                        console:infof("Created album in Immich: %s", albumName)
-                    else
-                        console:errorf("Failed to create album in Immich: %s", albumName)
-                    end
+                albumCount = albumCount + 1
+                table.insert(albumsToCreate, albumName)
+            end
+        end
+
+        -- Then create them with progress updates
+        for i, albumName in ipairs(albumsToCreate) do
+            immichCreateScope:setPortionComplete(i - 1, albumCount)
+            immichCreateScope:setCaption("Creating album: " .. albumName)
+
+            -- Check for cancelation
+            if immichCreateScope:isCanceled() then
+                console:infof("Sync canceled during 'Creating albums in Immich' phase while creating album: %s",
+                    albumName)
+                mainScope:done()
+                return
+            end
+            -- Album is already filtered in the loop above
+            console:infof((isDryRun and "[DRY RUN] " or "") .. "Creating album in Immich: %s", albumName)
+            if not isDryRun then
+                -- Create album and get the album data back
+                local albumData = ImmichAPI.createImmichAlbum(albumName)
+                if albumData then
+                    -- Add the newly created album to our list
+                    immichAlbums[albumName] = albumData
+                    console:infof("Created album in Immich: %s", albumName)
+                else
+                    console:errorf("Failed to create album in Immich: %s", albumName)
                 end
             end
         end
+
+        immichCreateScope:done()
     end
 
     -- Sync photo lists between Lightroom and Immich
     console:info(getDryRunPrefix(isDryRun) .. "Syncing photo lists between Lightroom and Immich...")
 
+    -- Phase 5: Syncing photos
+    local photoSyncScope = LrProgressScope({
+        title = "Syncing photos",
+        parent = mainScope
+    })
+
+    -- Count albums to sync
+    local albumsToSync = {}
     for albumName, albumData in pairs(immichAlbums) do
         local lightroomAlbum = lightroomAlbums[albumName]
-
         if isAlbumSelected(albumName, selectedAlbums) and lightroomAlbum then
-            console:infof((isDryRun and "[DRY RUN] " or "") .. "Syncing photos for album: %s", albumName)
+            table.insert(albumsToSync, {
+                name = albumName,
+                data = albumData,
+                lrAlbum = lightroomAlbum
+            })
+        end
+    end
 
-            -- Get photos in Immich album
-            local immichPhotos = ImmichAPI.getPhotosInImmichAlbum(albumData.id)
-            local immichPhotoDatedItems = {}
-            for immichPhotoPath, photoId in pairs(immichPhotos) do
-                local datedPath = immichPhotoPath:match(
-                    "(%d%d%d%d/%d%d%d%d%-%d%d/%d%d%d%d%-%d%d%-%d%d/%d%d%d%d%-%d%d%-%d%d %- .+)$")
-                if datedPath then
-                    local basename = LrPathUtils.leafName(datedPath)
-                    local dateDirname, filename = basename:match("^(.-) %- (.+)$")
-                    immichPhotoDatedItems[filename] = {
-                        immichPhotoPath = immichPhotoPath,
-                        dateDirname = dateDirname,
-                        filename = filename,
-                        basename = basename
-                    }
+    local albumCount = #albumsToSync
+
+    for i, album in ipairs(albumsToSync) do
+        local albumName = album.name
+        local albumData = album.data
+        local lightroomAlbum = album.lrAlbum
+
+        photoSyncScope:setCaption("Syncing album (" .. albumName .. ")")
+        -- Reset progress for each album
+        photoSyncScope:setPortionComplete(0, 1)
+        console:infof((isDryRun and "[DRY RUN] " or "") .. "Syncing photos for album: %s", albumName)
+
+        -- Check for cancelation
+        if photoSyncScope:isCanceled() then
+            console:infof("Sync canceled during 'Syncing photos' phase while starting to sync album: %s", albumName)
+            mainScope:done()
+            return
+        end
+
+        -- Get photos in Immich album
+        local immichPhotos = ImmichAPI.getPhotosInImmichAlbum(albumData.id)
+        local immichPhotoDatedItems = {}
+        for immichPhotoPath, photoId in pairs(immichPhotos) do
+            local datedPath = immichPhotoPath:match(
+                "(%d%d%d%d/%d%d%d%d%-%d%d/%d%d%d%d%-%d%d%-%d%d/%d%d%d%d%-%d%d%-%d%d %- .+)$")
+            if datedPath then
+                local basename = LrPathUtils.leafName(datedPath)
+                local dateDirname, filename = basename:match("^(.-) %- (.+)$")
+                immichPhotoDatedItems[filename] = {
+                    immichPhotoPath = immichPhotoPath,
+                    dateDirname = dateDirname,
+                    filename = filename,
+                    basename = basename
+                }
+            end
+        end
+
+        -- Get photos in Lightroom album
+        local lightroomPhotoDatedItems = {}
+        local lightroomPhotos = lightroomAlbum:getPhotos()
+        for _, photo in ipairs(lightroomPhotos) do
+            local photoPath = photo:getRawMetadata("path")
+            local datedPath = photoPath:match(".*(%d%d%d%d%/%d%d%d%d%-%d%d%/%d%d%d%d%-%d%d%-%d%d%/.+)$") or
+                                  photoPath:match(".*(%d%d%d%d%/%d%d%d%d%-%d%d%-%d%d%/.+)$")
+            if datedPath then
+                lightroomPhotoDatedItems[datedPath] = photoPath
+            else
+                console:infof((isDryRun and "[DRY RUN] " or "") ..
+                                  "Warning: Photo path does not match expected format: %s", photoPath)
+            end
+        end
+
+        -- Add photos from Lightroom to Immich album:
+        local lrPhotosToAdd = {}
+        for datedLrPath, lrPath in pairs(lightroomPhotoDatedItems) do
+            if not immichPhotoDatedItems[datedLrPath] then
+                table.insert(lrPhotosToAdd, {
+                    path = datedLrPath,
+                    fullPath = lrPath
+                })
+            end
+        end
+
+        local totalPhotosToProcess = #lrPhotosToAdd
+
+        for idx, photoInfo in ipairs(lrPhotosToAdd) do
+            local lrPath = photoInfo.fullPath
+
+            -- Update progress within this album's photo sync
+            photoSyncScope:setPortionComplete(idx, totalPhotosToProcess)
+
+            -- Check for cancelation
+            if photoSyncScope:isCanceled() then
+                console:infof("Sync canceled during 'Syncing photos' phase while adding photo to Immich: %s", lrPath)
+                mainScope:done()
+                return
+            end
+            -- Already filtered in the loop above
+            console:infof((isDryRun and "[DRY RUN] " or "") .. "Adding photo to Immich: %s", lrPath)
+
+            if not isDryRun then
+                -- get leaf and the most nested folder name
+                local filename = LrPathUtils.leafName(lrPath)
+                -- Extract the full date (YYYY-MM-DD) from the path
+                local dateDirname = lrPath:match(".*(%d%d%d%d%-%d%d%-%d%d)/")
+
+                -- Choose function based on user preference
+                if prefs.ignoreFileExtensions then
+                    -- Use the function that ignores file extensions
+                    ImmichAPI.addAssetToAlbumByOriginalPathWithoutExtension(albumData.id,
+                        dateDirname .. " - " .. filename)
+                else
+                    -- Use the original function that requires exact match
+                    ImmichAPI.addAssetToAlbumByOriginalPath(albumData.id, dateDirname .. " - " .. filename)
                 end
             end
 
-            -- Get photos in Lightroom album
-            local lightroomPhotoDatedItems = {}
-            local lightroomPhotos = lightroomAlbum:getPhotos()
-            for _, photo in ipairs(lightroomPhotos) do
-                local photoPath = photo:getRawMetadata("path")
-                local datedPath = photoPath:match(".*(%d%d%d%d%/%d%d%d%d%-%d%d%/%d%d%d%d%-%d%d%-%d%d%/.+)$") or
-                                      photoPath:match(".*(%d%d%d%d%/%d%d%d%d%-%d%d%-%d%d%/.+)$")
-                if datedPath then
-                    lightroomPhotoDatedItems[datedPath] = photoPath
+        end
+
+        -- Add photos from Immich to Lightroom album:
+        local immichPhotosToAdd = {}
+        for datedImmichPath, immichItem in pairs(immichPhotoDatedItems) do
+            if not lightroomPhotoDatedItems[datedImmichPath] then
+                table.insert(immichPhotosToAdd, {
+                    path = datedImmichPath,
+                    item = immichItem
+                })
+            end
+        end
+
+        local totalImmichPhotos = #immichPhotosToAdd
+
+        for idx, photoInfo in ipairs(immichPhotosToAdd) do
+            local immichItem = photoInfo.item
+
+            -- Update progress within this album's photo sync
+            photoSyncScope:setPortionComplete(idx + #lrPhotosToAdd, totalImmichPhotos + #lrPhotosToAdd)
+
+            -- Check for cancelation
+            if photoSyncScope:isCanceled() then
+                console:infof("Sync canceled during 'Syncing photos' phase while adding photo to Lightroom: %s",
+                    immichItem.immichPhotoPath)
+                mainScope:done()
+                return
+            end
+            -- Already filtered in the loop above
+            console:infof((isDryRun and "[DRY RUN] " or "") .. "Adding photo to Lightroom: %s",
+                immichItem.immichPhotoPath)
+
+            if not isDryRun then
+                local basename = LrPathUtils.leafName(immichItem.immichPhotoPath)
+
+                if immichItem.dateDirname and immichItem.filename then
+                    local filenameWithoutExtension = immichItem.filename:gsub("%.%w+$", "")
+
+                    local catalog = LrApplication.activeCatalog()
+                    local photos = catalog:findPhotos({
+                        searchDesc = {
+                            {
+                                criteria = "filename",
+                                operation = "any",
+                                value = filenameWithoutExtension
+                            },
+                            {
+                                criteria = "folder",
+                                operation = "==",
+                                value = immichItem.dateDirname
+                            },
+                            combine = "intersect"
+                        }
+                    })
+
+                    -- keep only photos that match as "filename.(any extension)":
+                    local filteredPhotos = {}
+                    for _, photo in ipairs(photos) do
+                        local photoPath = photo:getRawMetadata("path")
+                        local photoFilename = LrPathUtils.leafName(photoPath)
+                        local photoBasenameWithoutExtension = photoFilename:gsub("%.%w+$", "")
+
+                        if photoBasenameWithoutExtension == filenameWithoutExtension then
+                            table.insert(filteredPhotos, photo)
+                        end
+                    end
+
+                    if #filteredPhotos == 0 then
+                        console:infof((isDryRun and "[DRY RUN] " or "") ..
+                                          "Photo not found in Lightroom: immich path = %s, dateDirname = %s, filename = %s",
+                            immichItem.immichPhotoPath, immichItem.dateDirname, immichItem.filename)
+                    else
+                        for _, photo in ipairs(filteredPhotos) do
+                            local photoPath = photo:getRawMetadata("path")
+                            console:infof((isDryRun and "[DRY RUN] " or "") ..
+                                              "Adding photo found in Lightroom to the album: %s", photoPath)
+                        end
+
+                        catalog:withWriteAccessDo("Add Photos to Album", function(context)
+                            lightroomAlbum:addPhotos(filteredPhotos)
+                        end)
+                    end
                 else
                     console:infof((isDryRun and "[DRY RUN] " or "") ..
-                                      "Warning: Photo path does not match expected format: %s", photoPath)
-                end
-            end
-
-            -- Add photos from Lightroom to Immich album:
-            for datedLrPath, lrPath in pairs(lightroomPhotoDatedItems) do
-                if not immichPhotoDatedItems[datedLrPath] then
-                    console:infof((isDryRun and "[DRY RUN] " or "") .. "Adding photo to Immich: %s", lrPath)
-
-                    if not isDryRun then
-                        -- get leaf and the most nested folder name
-                        local filename = LrPathUtils.leafName(lrPath)
-                        -- Extract the full date (YYYY-MM-DD) from the path
-                        local dateDirname = lrPath:match(".*(%d%d%d%d%-%d%d%-%d%d)/")
-
-                        -- Choose function based on user preference
-                        if prefs.ignoreFileExtensions then
-                            -- Use the function that ignores file extensions
-                            ImmichAPI.addAssetToAlbumByOriginalPathWithoutExtension(albumData.id,
-                                dateDirname .. " - " .. filename)
-                        else
-                            -- Use the original function that requires exact match
-                            ImmichAPI.addAssetToAlbumByOriginalPath(albumData.id, dateDirname .. " - " .. filename)
-                        end
-                    end
-                end
-            end
-
-            -- Add photos from Immich to Lightroom album:
-            for datedImmichPath, immichItem in pairs(immichPhotoDatedItems) do
-                if not lightroomPhotoDatedItems[datedImmichPath] then
-                    console:infof((isDryRun and "[DRY RUN] " or "") .. "Adding photo to Lightroom: %s",
-                        immichItem.immichPhotoPath)
-
-                    if not isDryRun then
-                        local basename = LrPathUtils.leafName(immichItem.immichPhotoPath)
-
-                        if immichItem.dateDirname and immichItem.filename then
-                            local filenameWithoutExtension = immichItem.filename:gsub("%.%w+$", "")
-
-                            local catalog = LrApplication.activeCatalog()
-                            local photos = catalog:findPhotos({
-                                searchDesc = {
-                                    {
-                                        criteria = "filename",
-                                        operation = "any",
-                                        value = filenameWithoutExtension
-                                    },
-                                    {
-                                        criteria = "folder",
-                                        operation = "==",
-                                        value = immichItem.dateDirname
-                                    },
-                                    combine = "intersect"
-                                }
-                            })
-
-                            -- keep only photos that match as "filename.(any extension)":
-                            local filteredPhotos = {}
-                            for _, photo in ipairs(photos) do
-                                local photoPath = photo:getRawMetadata("path")
-                                local photoFilename = LrPathUtils.leafName(photoPath)
-                                local photoBasenameWithoutExtension = photoFilename:gsub("%.%w+$", "")
-
-                                if photoBasenameWithoutExtension == filenameWithoutExtension then
-                                    table.insert(filteredPhotos, photo)
-                                end
-                            end
-
-                            if #filteredPhotos == 0 then
-                                console:infof((isDryRun and "[DRY RUN] " or "") ..
-                                                  "Photo not found in Lightroom: immich path = %s, dateDirname = %s, filename = %s",
-                                    immichItem.immichPhotoPath, immichItem.dateDirname, immichItem.filename)
-                            else
-                                for _, photo in ipairs(filteredPhotos) do
-                                    local photoPath = photo:getRawMetadata("path")
-                                    console:infof((isDryRun and "[DRY RUN] " or "") ..
-                                                      "Adding photo found in Lightroom to the album: %s", photoPath)
-                                end
-
-                                catalog:withWriteAccessDo("Add Photos to Album", function(context)
-                                    lightroomAlbum:addPhotos(filteredPhotos)
-                                end)
-                            end
-                        else
-                            console:infof((isDryRun and "[DRY RUN] " or "") ..
-                                              "Invalid Immich path: %s -> dirname = %s, filename = %s",
-                                immichItem.immichPhotoPath, immichItem.dateDirname, immichItem.filename)
-                        end
-                    end
+                                      "Invalid Immich path: %s -> dirname = %s, filename = %s",
+                        immichItem.immichPhotoPath, immichItem.dateDirname, immichItem.filename)
                 end
             end
         end
     end
+
+    photoSyncScope:done()
+
+    -- Complete the main progress scope
+    mainScope:done()
+
+    console:infof("%sAlbum sync completed successfully", getDryRunPrefix(isDryRun))
 
     if isDryRun then
         LrDialogs.message("Dry Run Complete",
