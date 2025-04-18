@@ -73,7 +73,7 @@ LrTasks.startAsyncTask(function()
         }},
 
         f:row{f:edit_field{
-            title = "Albums to Sync (semicolon separated):",
+            title = "Albums to Sync (semicolon separated, supports substring matching):",
             value = LrView.bind("selectedAlbums"),
             width_in_chars = 40
         }},

@@ -209,14 +209,33 @@ local function getLightroomAlbums()
     return albums
 end
 
--- Helper function to check if an album is selected for syncing
-local function isAlbumSelected(albumName, selectedAlbums)
-    return not prefs.syncSpecificAlbums or selectedAlbums[albumName]
-end
-
 -- Helper function to get the dry run prefix for log messages
 local function getDryRunPrefix(isDryRun)
     return isDryRun and "[DRY RUN] " or ""
+end
+
+-- Helper function to check if an album is selected for syncing
+local function isAlbumSelected(albumName, selectedAlbums)
+    -- If not in specific album mode, all albums are selected
+    if not prefs.syncSpecificAlbums then
+        return true
+    end
+
+    -- Check for exact match first
+    if selectedAlbums[albumName] then
+        console:debugf("Album '%s' matched exactly", albumName)
+        return true
+    end
+
+    -- Check for substring match
+    for selectedAlbumName, _ in pairs(selectedAlbums) do
+        if string.find(albumName, selectedAlbumName, 1, true) then
+            console:debugf("Album '%s' matched by substring '%s'", albumName, selectedAlbumName)
+            return true
+        end
+    end
+
+    return false
 end
 
 -- Helper function to show a confirmation dialog for album renaming
