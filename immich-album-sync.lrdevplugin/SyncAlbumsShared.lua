@@ -603,7 +603,7 @@ local function syncAlbums(options)
         local albumData = album.data
         local lightroomAlbum = album.lrAlbum
 
-        progressScope:setCaption("Syncing album (" .. albumName .. ")")
+        progressScope:setCaption("Syncing album " .. i .. "/" .. albumCount .. " (" .. albumName .. ")")
         -- Reset progress for each album
         progressScope:setPortionComplete(0, 1)
         console:infof((isDryRun and "[DRY RUN] " or "") .. "Syncing photos for album: %s", albumName)
