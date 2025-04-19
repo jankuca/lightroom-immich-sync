@@ -11,6 +11,47 @@ local console = LrLogger("ImmichAlbumSync")
 
 local prefs = LrPrefs.prefsForPlugin()
 
+local LrTasks = import "LrTasks"
+
+-- Utility function to retry an API call with exponential backoff
+-- Parameters:
+--   apiCallFn: Function that performs the API call and returns the result
+--   validateFn: Function that validates the result and returns true if valid, false otherwise
+--   maxRetries: Maximum number of retry attempts (default: 2)
+--   retryDelay: Initial delay in seconds between retries (default: 1)
+--   logPrefix: Prefix for log messages (default: "API call")
+local function retryApiCall(params)
+    local apiCallFn = params.apiCallFn
+    local validateFn = params.validateFn
+    local maxRetries = params.maxRetries or 2
+    local retryDelay = params.retryDelay or 1
+    local logPrefix = params.logPrefix or "API call"
+
+    local attempt = 0
+    local result
+
+    while attempt <= maxRetries do
+        attempt = attempt + 1
+
+        -- Perform the API call
+        result = apiCallFn()
+
+        -- Validate the result
+        if validateFn(result) then
+            return result
+        end
+
+        -- Log the retry attempt
+        if attempt <= maxRetries then
+            console:infof("Retry %d/%d: %s failed, retrying in %d second(s)", attempt, maxRetries, logPrefix, retryDelay)
+            LrTasks.sleep(retryDelay)
+        end
+    end
+
+    console:warnf("All retries failed for %s", logPrefix)
+    return result
+end
+
 local function getImmichAlbums()
     local response = LrHttp.get(prefs.immichURL .. "/api/albums", {{
         field = "x-api-key",
@@ -99,22 +140,48 @@ local function getPhotosInImmichAlbum(albumId)
     return photos, albumData
 end
 
--- Helper function to search for assets by path
+-- Helper function to search for assets by path with retries
 local function searchAssetsByPath(searchPath, logMessage)
     local searchPayload = json.encode({
         originalPath = searchPath
     })
-    local searchResponse = LrHttp.post(prefs.immichURL .. "/api/search/metadata", searchPayload, {{
-        field = "x-api-key",
-        value = prefs.apiKey
-    }, {
-        field = "Content-Type",
-        value = "application/json"
-    }})
 
-    console:debugf(logMessage, searchPath, searchResponse)
+    local result = retryApiCall({
+        apiCallFn = function()
+            local searchResponse = LrHttp.post(prefs.immichURL .. "/api/search/metadata", searchPayload, {{
+                field = "x-api-key",
+                value = prefs.apiKey
+            }, {
+                field = "Content-Type",
+                value = "application/json"
+            }})
 
-    return json.decode(searchResponse)
+            local data = searchResponse and json.decode(searchResponse)
+            return {
+                response = searchResponse,
+                data = data
+            }
+        end,
+        validateFn = function(result)
+            return result.data and result.data.assets and result.data.assets.items
+        end,
+        maxRetries = 2,
+        retryDelay = 1,
+        logPrefix = "Search asset by path: " .. searchPath
+    })
+
+    console:debugf(logMessage, searchPath, result.response)
+
+    -- If we still don't have valid data after all retries, return an empty structure
+    if not result.data or not result.data.assets or not result.data.assets.items then
+        return {
+            assets = {
+                items = {}
+            }
+        }
+    end
+
+    return result.data
 end
 
 -- Helper function to add assets to an album
@@ -214,10 +281,14 @@ local function updateImmichAlbumName(albumId, newName)
 end
 
 return {
+    -- Core API functions
     getImmichAlbums = getImmichAlbums,
     createImmichAlbum = createImmichAlbum,
     getPhotosInImmichAlbum = getPhotosInImmichAlbum,
     addAssetToAlbumByOriginalPath = addAssetToAlbumByOriginalPath,
     addAssetToAlbumByOriginalPathWithoutExtension = addAssetToAlbumByOriginalPathWithoutExtension,
-    updateImmichAlbumName = updateImmichAlbumName
+    updateImmichAlbumName = updateImmichAlbumName,
+
+    -- Utility functions
+    retryApiCall = retryApiCall
 }
