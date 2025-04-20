@@ -307,9 +307,11 @@ end
 
 local function syncAlbums(options)
     local isDryRun = options and options.isDryRun or false
-    console:infof('%sStarting album sync%s', getDryRunPrefix(isDryRun), isDryRun and " (no changes will be made)" or "")
+    local isQuickMode = options and options.isQuickMode or false
+    local modePrefix = isQuickMode and "quick " or ""
+    console:infof('%sStarting %salbum sync%s', getDryRunPrefix(isDryRun), modePrefix, isDryRun and " (no changes will be made)" or "")
 
-    console:infof("%sStarting album sync with progress indicator and cancelation support", getDryRunPrefix(isDryRun))
+    console:infof("%sStarting %salbum sync with progress indicator and cancelation support", getDryRunPrefix(isDryRun), modePrefix)
 
     -- Phase 1: Getting album lists
     local progressScope = LrProgressScope({
@@ -596,6 +598,125 @@ local function syncAlbums(options)
         end
     end
 
+    -- If quick mode is enabled, check photo counts first
+    if isQuickMode then
+        console:info(getDryRunPrefix(isDryRun) .. "Quick mode enabled - checking photo counts before syncing...")
+        console:info(getDryRunPrefix(isDryRun) .. "Note: Videos and originals of enhanced photos in Lightroom albums will be excluded from the count")
+        console:info(getDryRunPrefix(isDryRun) .. "Using assetCount from album data for Immich photo counts - no need to fetch photos individually")
+
+        -- Create a new progress scope for counting photos
+        local countProgressScope = LrProgressScope({
+            title = "Counting photos in albums",
+            functionContext = options and options.functionContext
+        })
+
+        local albumsToRemove = {}
+        for i, album in ipairs(albumsToSync) do
+            countProgressScope:setCaption("Counting photos in album " .. i .. "/" .. #albumsToSync .. " (" .. album.name .. ")")
+            countProgressScope:setPortionComplete(i - 1, #albumsToSync)
+
+            -- Check for cancelation
+            if countProgressScope:isCanceled() then
+                console:infof("Sync canceled during 'Counting photos' phase while checking album: %s", album.name)
+                countProgressScope:done()
+                progressScope:done()
+                return
+            end
+
+            -- Count photos in Lightroom album (excluding videos and originals of enhanced photos)
+            local lightroomPhotos = album.lrAlbum:getPhotos()
+
+            -- First pass: identify enhanced photos and their base names
+            local enhancedBaseNames = {}
+
+            for _, photo in ipairs(lightroomPhotos) do
+                local photoPath = photo:getRawMetadata("path")
+                local filename = LrPathUtils.leafName(photoPath)
+                local filenameWithoutExt = filename:gsub("%.%w+$", "")
+
+                -- Check if this is an enhanced photo
+                if filenameWithoutExt:match("%-Enhanced") then
+                    -- Extract the base name (everything before -Enhanced)
+                    local baseName = filenameWithoutExt:match("(.+)%-Enhanced")
+                    if baseName then
+                        enhancedBaseNames[baseName] = true
+                        console:debugf("Found enhanced photo: %s, base name: %s", filenameWithoutExt, baseName)
+                    end
+                end
+            end
+
+            -- Second pass: count photos, excluding videos and originals of enhanced photos
+            local lightroomPhotoCount = 0
+            local excludedOriginals = 0
+
+            for _, photo in ipairs(lightroomPhotos) do
+                -- Check if the photo is a video
+                local isVideo = photo:getRawMetadata('isVideo')
+
+                -- Get the filename without extension
+                local photoPath = photo:getRawMetadata("path")
+                local filename = LrPathUtils.leafName(photoPath)
+                local filenameWithoutExt = filename:gsub("%.%w+$", "")
+
+                -- Check if this is an original of an enhanced photo
+                local isOriginalOfEnhanced = enhancedBaseNames[filenameWithoutExt] or false
+
+                if not isVideo and not isOriginalOfEnhanced then
+                    lightroomPhotoCount = lightroomPhotoCount + 1
+                elseif not isVideo and isOriginalOfEnhanced then
+                    excludedOriginals = excludedOriginals + 1
+                    console:debugf("Excluded original photo: %s (has enhanced version)", filenameWithoutExt)
+                end
+            end
+
+            -- Log the number of excluded originals
+            if excludedOriginals > 0 then
+                console:infof(getDryRunPrefix(isDryRun) .. "Excluded %d originals of enhanced photos from count in album '%s'",
+                    excludedOriginals, album.name)
+            end
+
+            -- Get photo count from Immich album data
+            local immichPhotoCount = album.data.assetCount or 0
+            console:debugf("Using assetCount from album data: %d for album '%s'", immichPhotoCount, album.name)
+
+            -- Compare counts
+            if lightroomPhotoCount == immichPhotoCount then
+                console:infof(getDryRunPrefix(isDryRun) .. "Skipping album '%s' - photo counts match (Lightroom: %d [excluding videos & originals of enhanced photos], Immich: %d)",
+                    album.name, lightroomPhotoCount, immichPhotoCount)
+                table.insert(albumsToRemove, i)
+            else
+                console:infof(getDryRunPrefix(isDryRun) .. "Album '%s' needs syncing - photo counts differ (Lightroom: %d [excluding videos & originals of enhanced photos], Immich: %d)",
+                    album.name, lightroomPhotoCount, immichPhotoCount)
+            end
+        end
+
+        -- Remove albums with matching photo counts from the sync list (in reverse order to avoid index issues)
+        for i = #albumsToRemove, 1, -1 do
+            table.remove(albumsToSync, albumsToRemove[i])
+        end
+
+        countProgressScope:done()
+
+        console:infof(getDryRunPrefix(isDryRun) .. "Quick mode: %d albums need syncing, %d albums skipped",
+            #albumsToSync, #albumsToRemove)
+
+        -- If all albums were skipped, show a message and exit early
+        if #albumsToSync == 0 then
+            progressScope:done()
+            console:infof("%sAll albums have matching photo counts - nothing to sync", getDryRunPrefix(isDryRun))
+
+            local modePrefix = isQuickMode and "Quick " or ""
+            if isDryRun then
+                LrDialogs.message(modePrefix .. "Dry Run Complete",
+                    "All albums have matching photo counts - nothing to sync.", "info")
+            else
+                LrDialogs.message(modePrefix .. "Album Sync Complete",
+                    "All albums have matching photo counts - nothing to sync.", "info")
+            end
+            return
+        end
+    end
+
     local albumCount = #albumsToSync
 
     for i, album in ipairs(albumsToSync) do
@@ -823,13 +944,14 @@ local function syncAlbums(options)
 
     progressScope:done()
 
-    console:infof("%sAlbum sync completed successfully", getDryRunPrefix(isDryRun))
+    local modePrefix = isQuickMode and "Quick " or ""
+    console:infof("%s%sAlbum sync completed successfully", getDryRunPrefix(isDryRun), modePrefix)
 
     if isDryRun then
-        LrDialogs.message("Dry Run Complete",
-            "Dry run completed. Check the log for details on what would happen during a real sync.", "info")
+        LrDialogs.message(modePrefix .. "Dry Run Complete",
+            modePrefix .. "Dry run completed. Check the log for details on what would happen during a real sync.", "info")
     else
-        LrDialogs.message("Album Sync Complete")
+        LrDialogs.message(modePrefix .. "Album Sync Complete")
     end
 end
 

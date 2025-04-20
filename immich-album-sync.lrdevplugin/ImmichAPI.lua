@@ -70,6 +70,7 @@ local function getImmichAlbums()
                 startDate = album.startDate,
                 endDate = album.endDate,
                 albumName = album.albumName,
+                assetCount = album.assetCount,
                 albumInfo = album
             }
         end
